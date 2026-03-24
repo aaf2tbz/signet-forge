@@ -808,7 +808,12 @@ impl App {
                             self.scroll_offset = 0;
                         }
                         "model" => {
-                            self.model_picker = Some(ModelPicker::new());
+                            if self.provider_name.ends_with("-cli") {
+                                let path = self.cli_path.clone().unwrap_or_default();
+                                self.model_picker = Some(ModelPicker::with_cli(&self.provider_name, &path));
+                            } else {
+                                self.model_picker = Some(ModelPicker::new());
+                            }
                         }
                         "dashboard" => {
                             let url = self
@@ -992,7 +997,12 @@ impl App {
         match &cmd.kind {
             PaletteCommandKind::BuiltIn(action) => match action.as_str() {
                 "model_picker" => {
-                    self.model_picker = Some(ModelPicker::new());
+                    if self.provider_name.ends_with("-cli") {
+                        let path = self.cli_path.clone().unwrap_or_default();
+                        self.model_picker = Some(ModelPicker::with_cli(&self.provider_name, &path));
+                    } else {
+                        self.model_picker = Some(ModelPicker::new());
+                    }
                 }
                 "clear" => {
                     self.entries.clear();
