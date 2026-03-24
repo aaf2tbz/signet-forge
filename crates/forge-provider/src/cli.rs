@@ -1,8 +1,8 @@
 use crate::{CompletionOpts, CompletionStream, Provider, StreamEvent};
 use async_trait::async_trait;
 use forge_core::{ForgeError, Message, MessageContent, Role, ToolDefinition, TokenUsage};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use std::io::BufRead;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, warn};
 
@@ -181,51 +181,69 @@ impl Provider for CliProvider {
         let args = self.build_args(&prompt, opts.effort);
 
         debug!(
-            "Spawning CLI: {} {}",
+            "Spawning CLI via PTY: {} {}",
             self.cli_path,
             args.join(" ").chars().take(200).collect::<String>()
         );
 
-        let mut child = Command::new(&self.cli_path)
-            .args(&args)
-            .env("SIGNET_NO_HOOKS", "1") // Prevent recursive Signet hooks
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
+        // Use a PTY so the CLI gets line-buffered stdout (thinks it's a terminal).
+        // Without this, piped stdout is fully-buffered and output arrives in large
+        // chunks or only after the process exits — no live streaming.
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 200, pixel_width: 0, pixel_height: 0 })
+            .map_err(|e| ForgeError::provider(format!("Failed to open PTY: {e}")))?;
+
+        let mut cmd = CommandBuilder::new(&self.cli_path);
+        cmd.args(&args);
+        cmd.env("SIGNET_NO_HOOKS", "1");
+        // Suppress color/cursor escape sequences from CLIs
+        cmd.env("NO_COLOR", "1");
+        cmd.env("TERM", "dumb");
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
             .map_err(|e| ForgeError::provider(format!("Failed to spawn {}: {e}", self.cli_path)))?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| ForgeError::provider("No stdout from CLI process"))?;
+        // Drop the slave side — we only read from the master
+        drop(pair.slave);
 
-        let stderr = child.stderr.take();
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| ForgeError::provider(format!("Failed to clone PTY reader: {e}")))?;
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
         let cli_kind = self.cli_kind;
 
-        tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
+        // Read PTY output on a blocking thread (portable-pty uses synchronous I/O)
+        tokio::task::spawn_blocking(move || {
+            let buf = std::io::BufReader::new(reader);
+            let lines_iter = buf.lines();
 
-            match cli_kind {
-                CliKind::Claude => {
-                    // Parse Claude's stream-json JSONL output
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        if line.trim().is_empty() {
-                            continue;
-                        }
+            // Macro to send events from the blocking thread
+            macro_rules! send {
+                ($event:expr) => {
+                    if tx.blocking_send($event).is_err() { return; }
+                };
+            }
+
+            for line_result in lines_iter {
+                let line = match line_result {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
+
+                match cli_kind {
+                    CliKind::Claude => {
                         let parsed: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(_) => {
-                                // Not JSON — emit as raw text
-                                if tx
-                                    .send(StreamEvent::TextDelta(format!("{line}\n")))
-                                    .await
-                                    .is_err()
-                                {
-                                    return;
-                                }
+                                send!(StreamEvent::TextDelta(format!("{line}\n")));
                                 continue;
                             }
                         };
@@ -237,80 +255,41 @@ impl Provider for CliProvider {
 
                         match event_type {
                             "assistant" => {
-                                // Extract text from assistant message
                                 if let Some(msg) = parsed.get("message") {
                                     let subtype = msg
                                         .get("type")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("");
                                     if subtype == "text" {
-                                        if let Some(text) =
-                                            msg.get("text").and_then(|v| v.as_str())
-                                        {
-                                            if tx
-                                                .send(StreamEvent::TextDelta(text.to_string()))
-                                                .await
-                                                .is_err()
-                                            {
-                                                return;
-                                            }
+                                        if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
+                                            send!(StreamEvent::TextDelta(text.to_string()));
                                         }
                                     }
                                 }
                             }
                             "content_block_delta" => {
-                                // Streaming text delta
                                 if let Some(delta) = parsed.get("delta") {
-                                    if let Some(text) =
-                                        delta.get("text").and_then(|v| v.as_str())
-                                    {
-                                        if tx
-                                            .send(StreamEvent::TextDelta(text.to_string()))
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
+                                    if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                                        send!(StreamEvent::TextDelta(text.to_string()));
                                     }
                                 }
                             }
                             "result" => {
-                                // Final result — extract any remaining text
-                                if let Some(result) =
-                                    parsed.get("result").and_then(|v| v.as_str())
-                                {
+                                if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
                                     if !result.is_empty() {
-                                        let _ = tx
-                                            .send(StreamEvent::TextDelta(result.to_string()))
-                                            .await;
+                                        let _ = tx.blocking_send(StreamEvent::TextDelta(result.to_string()));
                                     }
-                                }
-                                // Extract usage if present
-                                if let Some(cost) = parsed.get("cost_usd") {
-                                    debug!("CLI cost: {:?}", cost);
                                 }
                                 break;
                             }
-                            _ => {
-                                // Other event types (tool_use, tool_result, etc.)
-                                // are handled by the CLI internally — we just show status
-                                debug!("CLI event: {event_type}");
-                            }
+                            _ => {}
                         }
                     }
-                }
-                CliKind::Codex => {
-                    // Parse Codex JSONL output
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        if line.trim().is_empty() {
-                            continue;
-                        }
+                    CliKind::Codex => {
                         let parsed: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(_) => {
-                                let _ = tx
-                                    .send(StreamEvent::TextDelta(format!("{line}\n")))
-                                    .await;
+                                let _ = tx.blocking_send(StreamEvent::TextDelta(format!("{line}\n")));
                                 continue;
                             }
                         };
@@ -322,95 +301,51 @@ impl Provider for CliProvider {
 
                         match event_type {
                             "item.completed" => {
-                                // Extract text from completed item
                                 if let Some(text) = parsed
                                     .get("item")
                                     .and_then(|i| i.get("text"))
                                     .and_then(|t| t.as_str())
                                 {
-                                    if tx
-                                        .send(StreamEvent::TextDelta(text.to_string()))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
+                                    send!(StreamEvent::TextDelta(text.to_string()));
                                 }
                             }
                             "turn.completed" => {
-                                // Extract usage
                                 if let Some(usage) = parsed.get("usage") {
-                                    let input = usage
-                                        .get("input_tokens")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0)
-                                        as usize;
-                                    let output = usage
-                                        .get("output_tokens")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0)
-                                        as usize;
-                                    let _ = tx
-                                        .send(StreamEvent::Usage(TokenUsage {
-                                            input_tokens: input,
-                                            output_tokens: output,
-                                            ..Default::default()
-                                        }))
-                                        .await;
+                                    let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                                    let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                                    let _ = tx.blocking_send(StreamEvent::Usage(TokenUsage {
+                                        input_tokens: input,
+                                        output_tokens: output,
+                                        ..Default::default()
+                                    }));
                                 }
                                 break;
                             }
-                            _ => {
-                                debug!("Codex event: {event_type}");
-                            }
+                            _ => {}
                         }
                     }
-                }
-                CliKind::Gemini => {
-                    // Gemini CLI — treat as plain text output
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        if tx
-                            .send(StreamEvent::TextDelta(format!("{line}\n")))
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
+                    CliKind::Gemini => {
+                        send!(StreamEvent::TextDelta(format!("{line}\n")));
                     }
                 }
             }
 
-            // Wait for the process to finish and capture stderr on failure
-            match child.wait().await {
+            // Wait for the process to finish
+            match child.wait() {
                 Ok(status) => {
                     if !status.success() {
-                        let code = status.code().unwrap_or(-1);
-                        let mut stderr_text = String::new();
-                        if let Some(se) = stderr {
-                            let se_reader = BufReader::new(se);
-                            let mut se_lines = se_reader.lines();
-                            while let Ok(Some(line)) = se_lines.next_line().await {
-                                stderr_text.push_str(&line);
-                                stderr_text.push('\n');
-                            }
-                        }
-                        let err_msg = if stderr_text.trim().is_empty() {
-                            format!("CLI exited with code {code}")
-                        } else {
-                            format!("CLI exited with code {code}: {}", stderr_text.trim())
-                        };
+                        let code = status.exit_code();
+                        let err_msg = format!("CLI exited with code {code}");
                         warn!("{err_msg}");
-                        let _ = tx.send(StreamEvent::Error(err_msg)).await;
+                        let _ = tx.blocking_send(StreamEvent::Error(err_msg));
                     }
                 }
                 Err(e) => {
-                    let _ = tx
-                        .send(StreamEvent::Error(format!("CLI process error: {e}")))
-                        .await;
+                    let _ = tx.blocking_send(StreamEvent::Error(format!("CLI process error: {e}")));
                 }
             }
 
-            let _ = tx.send(StreamEvent::Done).await;
+            let _ = tx.blocking_send(StreamEvent::Done);
         });
 
         Ok(Box::pin(ReceiverStream::new(rx)))
