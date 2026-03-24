@@ -1,77 +1,77 @@
 # Signet Forge
 
-**Signet's native AI terminal.** A Rust TUI that calls provider APIs directly, executes tools natively, and integrates deeply with the Signet daemon for memory, extraction, identity, and session management.
+Signet's native AI terminal. A Rust TUI that gives Signet its own conversational interface — calling provider APIs directly, executing tools natively, and integrating with the Signet daemon over localhost for memory, extraction, identity, and session management.
 
-## Why Forge Exists
+## What This Is
 
-Signet currently operates as a **passenger** inside other AI tools. It hooks into Claude Code, OpenCode, and Codex via connector adapters and shell hooks — injecting memories through subprocess calls, scraping transcripts after sessions end, and hoping the host harness cooperates. Every harness has its own config format, session model, and tool system. Connectors must be written and maintained for each one.
+Signet is an open-source AI agent memory and identity system. It's provider-agnostic — it already runs extraction on local Ollama models (qwen3:4b), embeds with nomic-embed-text locally, and connects to any harness (Claude Code, OpenCode, Codex, OpenClaw) through connector adapters.
 
-**Forge inverts this.** Signet becomes the harness.
+The problem isn't that Signet is locked to a provider. **The problem is that Signet doesn't have its own terminal.** Every conversation goes through someone else's tool — Claude Code, OpenCode, Codex — and Signet hooks in via shell subprocesses, parsing stdout, hoping the harness fires hooks at the right time. Each harness has its own config format, session model, tool system, and permission model. Connectors must be written and maintained for each one.
 
-### What changes
+**Forge is Signet's own harness.** Instead of hooking into another tool, Signet drives the conversation directly.
 
-| Today (Connector Model) | Forge (Native Terminal) |
+## What Changes
+
+| With Connectors | With Forge |
 |---|---|
-| Signet hooks into Claude Code via shell subprocesses | Forge calls daemon HTTP API directly |
-| ~200ms latency per hook call | ~5ms for localhost HTTP |
-| Each harness needs a maintained connector package | Zero connector maintenance |
-| Model locked to whatever the harness supports | Any provider, hot-swappable mid-session |
-| Config scattered across settings.json + agent.yaml + .opencode.json | One config: agent.yaml |
-| Dashboard requires opening a browser to :3850 | Dashboard data rendered in TUI panels |
-| Identity files injected via hook stdout parsing | Identity loaded directly at startup |
-| Extraction triggered by session-end hook (fragile timing) | Extraction triggered by native session lifecycle |
+| Shell subprocess hooks (~200ms per call) | Direct HTTP to daemon (~5ms) |
+| One connector per harness to maintain | Zero connectors needed |
+| Config split across settings.json, agent.yaml, .opencode.json | One config: agent.yaml |
+| Identity injected via hook stdout parsing | Identity files read directly at startup |
+| Extraction triggered by session-end hook (fragile) | Native session lifecycle with reliable transcript submission |
 | Skills routed through harness slash command system | Skills loaded and executed natively |
 | MCP proxied through harness plugin system | MCP client built-in |
+| Dashboard requires a browser on :3850 | Dashboard data in TUI panels |
 
-### How it improves Signet's operation
+### Why This Matters for Signet
 
-**Memory integration becomes zero-overhead.** Instead of shell hooks that spawn subprocesses, parse stdout, and relay data through environment variables, Forge calls the daemon's HTTP API directly from native Rust. Memory injection on every prompt goes from ~200ms (subprocess spawn + HTTP + stdout parse) to ~5ms (direct HTTP on localhost).
+**Memory integration drops to ~5ms.** Forge calls the daemon's HTTP API directly from native Rust instead of spawning subprocesses that parse stdout and relay data through environment variables.
 
-**Session lifecycle is first-class.** Forge controls when sessions start, when context compacts, and when extraction runs. No more relying on the host harness to fire the right hook at the right time. The session-end hook's transcript submission — currently the most fragile part of the pipeline — becomes a direct, reliable HTTP POST.
+**Session lifecycle is reliable.** The session-end hook — currently the most fragile part of the pipeline because it depends on the host harness firing correctly — becomes a direct HTTP POST that Forge controls entirely.
 
-**Model-provider independence.** Signet is no longer locked to whatever model the host tool supports. Forge talks to Anthropic, OpenAI, Gemini, Groq, Ollama, and OpenRouter directly. Switch from Claude to GPT mid-conversation. Use Ollama for local extraction. The provider is a config value, not an infrastructure dependency.
+**Identity loads without intermediaries.** AGENTS.md, SOUL.md, IDENTITY.md, USER.md are read directly from `~/.agents/` at startup. No character limits, no stdout buffer truncation, no hook output parsing.
 
-**Identity loads natively.** AGENTS.md, SOUL.md, IDENTITY.md, USER.md — the files that define who the agent is — are read directly from `~/.agents/` at startup. No hook output parsing, no character limits, no truncation from subprocess stdout buffering.
+**API keys come from Signet's secret store.** Forge resolves keys through the daemon's secret API. No separate `.env` files per tool.
 
-**API keys come from Signet's secret store.** No separate `.env` files or per-tool key management. Forge resolves keys through the daemon's secret API on startup, caches them in memory. Switch providers and the key resolves automatically.
+**Config watches in real-time.** Forge monitors `~/.agents/agent.yaml` via filesystem notifications. Change the extraction model from the dashboard and Forge picks it up immediately.
 
-**Config sync is bidirectional.** Forge watches `~/.agents/agent.yaml` for changes (via filesystem notifications) and updates in real-time. It can also write config changes back — change the extraction model from the terminal UI and it syncs to agent.yaml.
+**Connector maintenance drops to zero.** No more `connector-claude-code`, `connector-opencode`, `connector-codex`, `connector-openclaw`. Each connector breaks when the upstream tool changes its API. Forge eliminates all of them.
 
-**Connector maintenance drops to zero.** No more `connector-claude-code`, `connector-opencode`, `connector-codex`, `connector-openclaw`. Each connector is a maintenance burden that breaks when the upstream tool changes its API. Forge eliminates all of them. Signet's memory, identity, and skills become the platform; LLM providers become interchangeable backends.
+## Four Models, One System
 
-### Model Architecture: Four Models, One System
+Signet uses four separate model configurations. Forge only controls the first one — the daemon manages the rest independently.
 
-Signet operates with four separate model configurations. Understanding this is critical:
-
-| Model | Who Controls It | Where Configured | Default |
+| Model | Purpose | Configured In | Default |
 |---|---|---|---|
-| **Conversational** | Forge (model picker / CLI) | `forge --model` or Ctrl+O | claude-sonnet-4-6 |
-| **Synthesis** | Daemon summary worker | `agent.yaml` → `pipelineV2.synthesis` | claude-code/haiku |
-| **Extraction** | Daemon extraction worker | `agent.yaml` → `pipelineV2.extraction` | qwen3:4b (Ollama) |
-| **Embedding** | Daemon vector search | `agent.yaml` → `embedding` | nomic-embed-text (Ollama) |
+| **Conversational** | What the user talks to | Forge CLI / Ctrl+O | claude-sonnet-4-6 |
+| **Synthesis** | Summarizes transcripts into facts | `agent.yaml` → `pipelineV2.synthesis` | claude-code/haiku |
+| **Extraction** | Deeper fact/entity analysis | `agent.yaml` → `pipelineV2.extraction` | qwen3:4b (Ollama) |
+| **Embedding** | Vector embeddings for memory search | `agent.yaml` → `embedding` | nomic-embed-text (Ollama) |
 
-**Switching the conversational model in Forge does NOT affect extraction or embedding.** The daemon manages its own models independently. Extraction and embedding typically run on local Ollama models (qwen3:4b and nomic-embed-text) for zero-cost, low-latency processing. The conversational model can be any cloud provider.
+Switching the conversational model does NOT touch extraction or embedding. Those typically run on local Ollama models for zero-cost, low-latency processing. The conversational model can be any cloud or local provider.
 
-When Forge calls the session-end hook, it sends the raw transcript. The daemon then:
-1. Queues a summary job → uses the **synthesis model** to extract facts
-2. Processes extraction jobs → uses the **extraction model** for deeper analysis
-3. Computes embeddings → uses the **embedding model** for vector search indexing
+When Forge sends a transcript to the daemon on session end, the daemon asynchronously:
+1. Runs the **synthesis model** to extract session facts
+2. Runs the **extraction model** for deeper entity/relationship analysis
+3. Computes **embeddings** for vector search indexing
 
-All three steps happen asynchronously after Forge sends the transcript. Forge never calls these models directly.
+Forge never calls these models directly.
 
-### Supported Providers
+## Providers
 
-| Provider | Models | API |
+Forge calls provider APIs directly — no intermediary harness. Switch mid-session with Ctrl+O.
+
+| Provider | Example Models | Notes |
 |---|---|---|
-| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Messages API |
-| **OpenAI** | GPT-4o, GPT-4o Mini, o4-mini | Chat Completions |
-| **Google** | Gemini 2.5 Flash, Gemini 2.5 Pro | GenerateContent |
-| **Groq** | Llama 3.3 70B | OpenAI-compatible |
-| **Ollama** | Any local model | OpenAI-compatible |
-| **OpenRouter** | Any routed model | OpenAI-compatible |
-| **xAI** | Grok models | OpenAI-compatible |
+| Anthropic | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Messages API with streaming |
+| OpenAI | GPT-4o, o4-mini | Chat Completions |
+| Google | Gemini 2.5 Flash, Gemini 2.5 Pro | GenerateContent (1M context) |
+| Groq | Llama 3.3 70B | OpenAI-compatible, fast inference |
+| Ollama | Any local model | OpenAI-compatible, no API key |
+| OpenRouter | Any routed model | Aggregator for 100+ models |
+| xAI | Grok | OpenAI-compatible |
 
-Switch between any provider mid-session with Ctrl+O. API keys resolve automatically from Signet's secret store.
+API keys resolve from Signet's secret store or environment variables. Ollama needs no key.
 
 ## Architecture
 
@@ -80,32 +80,30 @@ Switch between any provider mid-session with Ctrl+O. API keys resolve automatica
 │                     FORGE (Rust)                     │
 │                                                       │
 │  ┌── forge-tui ────────────────────────────────────┐ │
-│  │ Chat View │ Model Picker │ Dashboard │ Command   │ │
-│  │ Palette │ Permissions Dialog │ Memory Panel      │ │
+│  │ Chat │ Model Picker │ Command Palette │ Perms   │ │
+│  │ Markdown Rendering │ Status Bar │ Themes        │ │
 │  └──────────────────────────────────────────────────┘ │
 │                                                       │
 │  ┌── forge-agent ──────────────────────────────────┐ │
 │  │ Agentic Loop (msg → LLM → tool calls → loop)    │ │
-│  │ Context Window Management + Auto-Compact         │ │
-│  │ Permission System │ Session State                │ │
+│  │ Context Compaction │ Permission System           │ │
+│  │ Session Persistence (SQLite)                     │ │
 │  └──────────────────────────────────────────────────┘ │
 │                                                       │
 │  ┌── forge-provider ───┐  ┌── forge-tools ─────────┐ │
-│  │ Anthropic (Claude)  │  │ Bash │ Read │ Write     │ │
-│  │ OpenAI (GPT/o-*)    │  │ Edit │ Glob │ Grep     │ │
-│  │ Google (Gemini)     │  │ Agent (sub-task)        │ │
-│  │ Groq │ Ollama       │  │ WebSearch │ WebFetch    │ │
-│  │ OpenRouter │ xAI    │  └─────────────────────────┘ │
+│  │ Anthropic │ OpenAI  │  │ Bash │ Read │ Write     │ │
+│  │ Gemini │ Groq       │  │ Edit │ Glob │ Grep      │ │
+│  │ Ollama │ OpenRouter  │  └─────────────────────────┘ │
+│  │ xAI                 │                              │
 │  └─────────────────────┘                              │
 │                                                       │
 │  ┌── forge-signet ─────┐  ┌── forge-mcp ──────────┐ │
-│  │ Daemon HTTP Client  │  │ MCP Client (stdio+SSE) │ │
-│  │ Memory Search/Store │  │ Tool Discovery          │ │
-│  │ Session Hooks       │  │ Signet MCP Tools        │ │
-│  │ Config Watcher      │  │ Marketplace Servers     │ │
-│  │ Secret Resolution   │  └─────────────────────────┘ │
+│  │ Daemon Client       │  │ MCP Client (stdio)     │ │
+│  │ Session Hooks       │  │ Tool Discovery         │ │
+│  │ Memory Recall/Store │  └─────────────────────────┘ │
+│  │ Secret Resolution   │                              │
+│  │ Config Watcher      │                              │
 │  │ Skill Loader        │                              │
-│  │ Dashboard Data      │                              │
 │  └─────────────────────┘                              │
 │                                                       │
 └───────────┬─────────────────────┬─────────────────────┘
@@ -113,27 +111,35 @@ Switch between any provider mid-session with Ctrl+O. API keys resolve automatica
             ▼                     ▼
     ┌───────────────┐     ┌───────────────┐
     │ AI Providers  │     │ Signet Daemon │
-    │ (Anthropic,   │     │ localhost:3850│
-    │  OpenAI,      │     │ Memory, Graph,│
-    │  Gemini...)   │     │ Pipeline,     │
-    └───────────────┘     │ Identity      │
-                          └───────────────┘
+    │ (cloud/local) │     │ localhost:3850│
+    └───────────────┘     └───────────────┘
 ```
+
+**8 crates:** forge-core (types), forge-provider (7 providers), forge-tools (6 tools), forge-mcp (MCP client), forge-signet (daemon integration), forge-agent (agentic loop), forge-tui (terminal UI), forge-cli (entry point).
 
 ## Usage
 
 ```bash
-# Default: Anthropic Claude, connects to Signet daemon
+# Default: Claude Sonnet, connects to Signet daemon
 forge
 
 # Specify model and provider
 forge --model claude-opus-4-6 --provider anthropic
 
-# Run without Signet daemon (standalone mode)
+# Use a local model
+forge --model qwen3:4b --provider ollama
+
+# Non-interactive: single prompt, streams response to stdout
+forge -p "explain this error" < error.log
+
+# Run without Signet daemon (standalone, no memory)
 forge --no-daemon
 
 # Resume last session
 forge --resume
+
+# Choose a theme
+forge --theme midnight
 ```
 
 ### Key Bindings
@@ -141,28 +147,50 @@ forge --resume
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
-| `Ctrl+O` | Model picker |
-| `Ctrl+K` | Command palette |
-| `Ctrl+S` | Memory search |
-| `F2` | Dashboard overlay |
-| `Ctrl+C` | Cancel generation |
-| `Ctrl+D` | Quit |
-| `Ctrl+L` | Clear screen |
-| `PageUp/Down` | Scroll chat |
+| `Ctrl+O` | Model picker — switch provider/model mid-session |
+| `Ctrl+K` | Command palette — search commands and skills |
+| `Ctrl+C` | Cancel current generation |
+| `Ctrl+D` | Quit (auto-saves session, submits transcript) |
+| `Ctrl+L` | Clear chat |
+| `PageUp/Down` | Scroll history |
+| `Y/A/N` | Permission dialog (Allow / Always Allow / Deny) |
+
+### Themes
+
+Four built-in themes: `signet-dark` (default), `signet-light`, `midnight`, `amber`.
+
+## Features
+
+- **Agentic loop** — prompt → LLM → tool calls → execute → loop until done
+- **6 built-in tools** — Bash, Read, Write, Edit, Glob, Grep
+- **Permission system** — auto-approve read-only tools, dialog for write operations
+- **Markdown rendering** — headers, code blocks, lists, bold/italic, blockquotes
+- **Context compaction** — auto-summarizes at 90% context window capacity
+- **Session persistence** — SQLite auto-save, `--resume` to continue
+- **Config watching** — real-time response to agent.yaml changes
+- **MCP client** — stdio transport with JSON-RPC for external tool servers
+- **Skills** — loads slash commands from `~/.agents/skills/`
+- **Signet hooks** — session-start (memory injection), prompt-submit (per-prompt recall), session-end (transcript extraction)
 
 ## Requirements
 
-- Rust toolchain (1.75+)
-- Signet daemon running on localhost:3850 (optional but recommended)
-- API key for at least one provider (resolved via Signet secrets or environment variables)
+- Rust 1.75+
+- Signet daemon on localhost:3850 (optional — Forge works standalone without memory)
+- API key for at least one provider (from Signet secrets or env vars)
 
 ## Building
 
 ```bash
 cargo build --release
+# Binary at target/release/forge
 ```
 
-The binary is at `target/release/forge`.
+Tag a release to trigger CI builds for macOS (ARM64/x64) and Linux (x64):
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## License
 
