@@ -49,6 +49,8 @@ pub enum Action {
     Keybinds,
     /// Open session browser
     SessionBrowser,
+    /// Open dashboard panel
+    DashboardPanel,
     /// No action
     None,
 }
@@ -87,6 +89,9 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => Action::Dashboard,
         (KeyModifiers::CONTROL, KeyCode::Char('b')) => Action::Keybinds,
         (KeyModifiers::CONTROL, KeyCode::Char('h')) => Action::SessionBrowser,
+
+        // Dashboard panel
+        (KeyModifiers::NONE, KeyCode::F(2)) => Action::DashboardPanel,
 
         // Character input
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => Action::InsertChar(c),

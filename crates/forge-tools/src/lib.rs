@@ -3,6 +3,8 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod read;
+pub mod webfetch;
+pub mod websearch;
 pub mod write;
 
 use async_trait::async_trait;
@@ -38,6 +40,8 @@ pub fn all_tools() -> Vec<Box<dyn Tool>> {
         Box::new(edit::EditTool),
         Box::new(glob::GlobTool),
         Box::new(grep::GrepTool),
+        Box::new(websearch::WebSearchTool),
+        Box::new(webfetch::WebFetchTool),
     ]
 }
 

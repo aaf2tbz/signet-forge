@@ -4,6 +4,7 @@ use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
 use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPalette};
 use crate::views::dashboard_nav::DashboardNav;
 use crate::views::keybind_editor::KeybindEditor;
+use crate::views::dashboard_panel::DashboardPanel;
 use crate::views::model_picker::ModelPicker;
 use crate::views::session_browser::SessionBrowser;
 use crate::views::signet_commands::{self, CommandPicker};
@@ -174,6 +175,8 @@ pub struct App {
     keybind_editor: Option<KeybindEditor>,
     /// Session browser overlay (Ctrl+H)
     session_browser: Option<SessionBrowser>,
+    /// Dashboard panel overlay (F2)
+    dashboard_panel: Option<DashboardPanel>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
@@ -365,6 +368,7 @@ impl App {
             dashboard_nav: None,
             keybind_editor: None,
             session_browser: None,
+            dashboard_panel: None,
             skills,
             signet_client,
             permissions,
@@ -711,6 +715,12 @@ impl App {
             let area = frame.area();
             browser.render_themed(area, frame.buffer_mut(), &self.theme);
         }
+
+        // Dashboard panel overlay
+        if let Some(panel) = &self.dashboard_panel {
+            let area = frame.area();
+            panel.render_themed(area, frame.buffer_mut(), &self.theme);
+        }
     }
 
     fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
@@ -788,6 +798,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If dashboard panel is open, handle its keys
+        if self.dashboard_panel.is_some() {
+            self.handle_dashboard_panel_key(key).await;
+            return;
+        }
+
         // If session browser is open, handle its keys
         if self.session_browser.is_some() {
             self.handle_session_browser_key(key).await;
@@ -971,8 +987,57 @@ impl App {
             Action::SessionBrowser if !self.processing => {
                 self.session_browser = Some(SessionBrowser::new());
             }
+            Action::DashboardPanel => {
+                self.open_dashboard_panel().await;
+            }
             Action::Dashboard if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
+            }
+            _ => {}
+        }
+    }
+
+    async fn open_dashboard_panel(&mut self) {
+        let mut panel = DashboardPanel::new();
+        if let Some(client) = &self.signet_client {
+            let (mem, pipe, emb, diag) = tokio::join!(
+                client.get("/api/memories?limit=0"),
+                client.get("/api/pipeline/status"),
+                client.get("/api/embeddings/health"),
+                client.get("/api/diagnostics"),
+            );
+            panel.data = crate::views::dashboard_panel::parse_dashboard(
+                mem.ok().as_ref(),
+                pipe.ok().as_ref(),
+                emb.ok().as_ref(),
+                diag.ok().as_ref(),
+            );
+            panel.loading = false;
+        } else {
+            panel.loading = false;
+        }
+        self.dashboard_panel = Some(panel);
+    }
+
+    async fn handle_dashboard_panel_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                self.dashboard_panel = None;
+            }
+            KeyCode::Left => {
+                if let Some(panel) = &mut self.dashboard_panel {
+                    panel.prev_tab();
+                }
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                if let Some(panel) = &mut self.dashboard_panel {
+                    panel.next_tab();
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                // Refresh
+                self.open_dashboard_panel().await;
             }
             _ => {}
         }

@@ -14,3 +14,5 @@ async-trait = { workspace = true }
 glob = { workspace = true }
 regex-lite = { workspace = true }
 tracing = { workspace = true }
+urlencoding = "2.1.3"
+reqwest = { workspace = true, features = ["json"] }
