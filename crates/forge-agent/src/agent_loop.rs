@@ -56,6 +56,8 @@ pub struct AgentLoop {
     bypass: Arc<Mutex<bool>>,
     /// Signet daemon URL (for Signet native tools)
     daemon_url: Option<String>,
+    /// Connected MCP servers (for external tool routing)
+    mcp_clients: Vec<Arc<forge_mcp::McpStdioClient>>,
 }
 
 impl AgentLoop {
@@ -70,12 +72,15 @@ impl AgentLoop {
         effort: Arc<Mutex<ReasoningEffort>>,
         bypass: Arc<Mutex<bool>>,
         daemon_url: Option<String>,
+        mcp_clients: Vec<Arc<forge_mcp::McpStdioClient>>,
     ) -> Self {
         let context_window = provider.context_window();
         let tool_definitions = match &daemon_url {
             Some(url) => forge_tools::all_definitions_with_signet(url),
             None => forge_tools::all_definitions(),
         };
+        // MCP tool definitions are added later via async refresh
+        let _ = &mcp_clients; // suppress unused warning until async init
         Self {
             provider,
             hooks,
@@ -88,6 +93,21 @@ impl AgentLoop {
             effort,
             bypass,
             daemon_url,
+            mcp_clients,
+        }
+    }
+
+    /// Refresh MCP tool definitions from connected servers
+    pub async fn refresh_mcp_tools(&mut self) {
+        for client in &self.mcp_clients {
+            match client.list_tools().await {
+                Ok(tools) => {
+                    self.tool_definitions.extend(tools);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to list MCP tools: {e}");
+                }
+            }
         }
     }
 
@@ -381,7 +401,17 @@ impl AgentLoop {
                 let result = if let Some(tool) = tool_impl {
                     tool.execute(tc).await
                 } else {
-                    forge_core::ToolResult::error(&tc.id, format!("Unknown tool: {}", tc.name))
+                    // Try MCP clients for tools not in the built-in registry
+                    let mut mcp_result = None;
+                    for client in &self.mcp_clients {
+                        if let Ok(output) = client.call_tool(&tc.name, tc.input.clone()).await {
+                            mcp_result = Some(forge_core::ToolResult::success(&tc.id, output));
+                            break;
+                        }
+                    }
+                    mcp_result.unwrap_or_else(|| {
+                        forge_core::ToolResult::error(&tc.id, format!("Unknown tool: {}", tc.name))
+                    })
                 };
 
                 let _ = self

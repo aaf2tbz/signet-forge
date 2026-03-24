@@ -294,6 +294,7 @@ impl App {
             Arc::clone(&effort),
             Arc::clone(&bypass),
             daemon_url,
+            Vec::new(),
         ));
 
         // Start config watcher
@@ -1741,6 +1742,7 @@ impl App {
             Arc::clone(&self.effort),
             Arc::clone(&self.bypass),
             daemon_url,
+            Vec::new(),
         ));
 
         self.event_rx = event_rx;

@@ -56,22 +56,20 @@ Six phases from scaffold to production. Each phase has a clear deliverable — s
 
 ---
 
-## Phase 4: MCP + Skills + Dashboard (In Progress)
+## Phase 4: MCP + Skills + Dashboard ✅
 **Goal:** Feature parity with Claude Code for Signet users, plus dashboard integration no other tool has.
 
 ### What gets built
 - [x] MCP client — stdio transport (subprocess JSON-RPC with initialize handshake)
+- [x] MCP tool routing — agent loop tries MCP clients for unknown tools (fallback chain)
 - [x] Skill loading from `~/.agents/skills/` — parse SKILL.md frontmatter, register as slash commands
 - [x] Command palette (Ctrl+K) — fuzzy search over built-in commands + skills
 - [x] CLI tool visibility — tool_use, tool_result, and code changes from CLI stream-json render as cards
-- [x] Signet native tools — memory_search, memory_store, knowledge_expand, secret_exec via daemon HTTP (no MCP needed)
+- [x] Signet native tools — memory_search, memory_store, knowledge_expand, secret_exec via daemon HTTP
 - [x] Dashboard overlay panel (F2) — tabbed view: Memory, Pipeline, Embeddings, Health with live data
 - [x] WebSearch tool — DuckDuckGo HTML search, no API key
 - [x] WebFetch tool — fetch + strip HTML to text, 50K char limit
-- [ ] Connect to Signet marketplace MCP servers (route daemon proxy tools)
-- [ ] Connect to external MCP servers (configured in forge config)
-- [ ] SSE event stream consumer for real-time dashboard updates
-- [ ] Sub-agent tool (spawn restricted-tool research tasks)
+- [x] 12 built-in tools total (Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, memory_search, memory_store, knowledge_expand, secret_exec)
 
 ---
 
@@ -111,6 +109,10 @@ These are stretch goals — things that become possible once the foundation is s
 - [ ] **Plugin system** — third-party tool and view extensions
 - [ ] **Interactive CLI prompts** — detect and respond to CLI approval prompts (write to file? y/n) from within the TUI
 - [ ] **Syntax highlighting** — syntect-based code block coloring per language
+- [ ] **SSE event stream** — real-time dashboard updates from daemon event bus
+- [ ] **Sub-agent tool** — spawn restricted-tool research tasks in parallel
+- [ ] **Marketplace MCP proxy** — route daemon marketplace proxy tools through Forge
+- [ ] **External MCP config** — configure and connect to arbitrary MCP servers
 
 ---
 
