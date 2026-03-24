@@ -111,11 +111,72 @@ forge --theme midnight                   # Set theme
 forge --no-daemon                        # Standalone, no Signet
 ```
 
-## Building
+## Install
+
+### macOS (Homebrew or binary)
 
 ```bash
+# From source
+cargo install --path .
+
+# Or build manually
 cargo build --release
-# Binary at target/release/forge
+cp target/release/forge /usr/local/bin/
+```
+
+### Linux (Ubuntu/Debian)
+
+```bash
+# Install Rust if needed
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Install system dependencies
+sudo apt update
+sudo apt install -y build-essential pkg-config libssl-dev libxcb-shape0-dev \
+  libxcb-xfixes0-dev libxkbcommon-dev # needed for arboard (clipboard)
+
+# Build and install
+git clone https://github.com/aaf2tbz/signet-forge.git
+cd signet-forge
+cargo build --release
+sudo cp target/release/forge /usr/local/bin/
+```
+
+### Linux (Fedora/RHEL)
+
+```bash
+sudo dnf install -y gcc openssl-devel libxcb-devel libxkbcommon-devel
+git clone https://github.com/aaf2tbz/signet-forge.git
+cd signet-forge
+cargo build --release
+sudo cp target/release/forge /usr/local/bin/
+```
+
+### Linux (Arch)
+
+```bash
+sudo pacman -S base-devel openssl libxcb libxkbcommon
+git clone https://github.com/aaf2tbz/signet-forge.git
+cd signet-forge
+cargo build --release
+sudo cp target/release/forge /usr/local/bin/
+```
+
+### From release binaries
+
+Tagged releases build automatically for macOS (ARM64, x64) and Linux (x64):
+
+```bash
+# Download from GitHub releases
+curl -L https://github.com/aaf2tbz/signet-forge/releases/latest/download/forge-linux-x64.tar.gz | tar xz
+sudo mv forge /usr/local/bin/
+```
+
+### Verify
+
+```bash
+forge --version
 ```
 
 ## License
