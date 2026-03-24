@@ -101,7 +101,62 @@ impl ModelPicker {
         }
     }
 
-    /// Create a picker that includes all detected CLI tools alongside API models
+    /// Create a picker with CLI models + optional daemon registry models
+    pub fn with_all(
+        clis: &[(forge_provider::cli::CliKind, String)],
+        registry: &[ModelEntry],
+    ) -> Self {
+        let mut models = Vec::new();
+
+        // CLI models first
+        for (kind, path) in clis {
+            let entries: Vec<(&str, &str, usize)> = match kind {
+                forge_provider::cli::CliKind::Claude => vec![
+                    ("claude-opus-4-6", "Claude Opus 4.6", 200_000),
+                    ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
+                    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200_000),
+                ],
+                forge_provider::cli::CliKind::Codex => vec![
+                    ("o4-mini", "o4-mini", 200_000),
+                    ("gpt-4o", "GPT-4o", 128_000),
+                    ("codex", "Codex (default)", 200_000),
+                ],
+                forge_provider::cli::CliKind::Gemini => vec![
+                    ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
+                    ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000),
+                ],
+            };
+            let provider = match kind {
+                forge_provider::cli::CliKind::Claude => "claude-cli",
+                forge_provider::cli::CliKind::Codex => "codex-cli",
+                forge_provider::cli::CliKind::Gemini => "gemini-cli",
+            };
+            for (model, name, ctx) in entries {
+                models.push(ModelEntry {
+                    provider: provider.into(),
+                    model: model.to_string(),
+                    display_name: format!("{name} (CLI)"),
+                    context_window: ctx,
+                    cli_path: Some(path.clone()),
+                });
+            }
+        }
+
+        // Daemon registry models (if available)
+        if !registry.is_empty() {
+            models.extend(registry.iter().cloned());
+        } else {
+            models.extend(default_models());
+        }
+
+        Self {
+            models,
+            selected: 0,
+            filter: String::new(),
+        }
+    }
+
+    /// Create a picker with CLI models + hardcoded defaults (no daemon)
     pub fn with_detected_clis(clis: &[(forge_provider::cli::CliKind, String)]) -> Self {
         use forge_provider::cli::CliKind;
         let mut models = Vec::new();

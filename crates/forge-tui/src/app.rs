@@ -5,6 +5,7 @@ use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPa
 use crate::views::dashboard_nav::DashboardNav;
 use crate::views::keybind_editor::KeybindEditor;
 use crate::views::model_picker::ModelPicker;
+use crate::views::session_browser::SessionBrowser;
 use crate::views::signet_commands::{self, CommandPicker};
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -133,6 +134,8 @@ pub struct App {
     cli_path: Option<String>,
     /// All detected CLI tools (for model picker)
     detected_clis: Vec<(forge_provider::cli::CliKind, String)>,
+    /// Models from daemon registry (fetched at startup)
+    registry_models: Vec<crate::views::model_picker::ModelEntry>,
     /// Current reasoning effort level (shared with agent loop)
     effort: Arc<Mutex<forge_provider::ReasoningEffort>>,
     /// CLI permission bypass — skips all approval prompts on next spawn
@@ -169,6 +172,8 @@ pub struct App {
     dashboard_nav: Option<DashboardNav>,
     /// Keybind editor overlay
     keybind_editor: Option<KeybindEditor>,
+    /// Session browser overlay (Ctrl+H)
+    session_browser: Option<SessionBrowser>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
@@ -340,6 +345,7 @@ impl App {
             attached_images: Vec::new(),
             cli_path,
             detected_clis: Vec::new(),
+            registry_models: Vec::new(),
             effort,
             bypass,
             memories_injected,
@@ -358,6 +364,7 @@ impl App {
             command_picker: None,
             dashboard_nav: None,
             keybind_editor: None,
+            session_browser: None,
             skills,
             signet_client,
             permissions,
@@ -385,6 +392,31 @@ impl App {
 
         // Detect installed CLI tools so model picker always shows them
         self.detected_clis = forge_provider::cli::detect_cli_tools().await;
+
+        // Fetch models from Signet daemon registry
+        if let Some(client) = &self.signet_client {
+            if let Ok(resp) = client.get("/api/pipeline/models").await {
+                if let Some(models) = resp.get("models").and_then(|v| v.as_array()) {
+                    self.registry_models = models
+                        .iter()
+                        .filter_map(|m| {
+                            let id = m.get("id")?.as_str()?;
+                            let provider = m.get("provider")?.as_str()?;
+                            let label = m.get("label")?.as_str()?;
+                            let deprecated = m.get("deprecated").and_then(|v| v.as_bool()).unwrap_or(false);
+                            if deprecated { return None; }
+                            Some(crate::views::model_picker::ModelEntry {
+                                provider: provider.to_string(),
+                                model: id.to_string(),
+                                display_name: label.to_string(),
+                                context_window: 200_000, // registry doesn't include context size
+                                cli_path: None,
+                            })
+                        })
+                        .collect();
+                }
+            }
+        }
 
         loop {
             // Increment animation tick
@@ -673,6 +705,12 @@ impl App {
             let area = frame.area();
             editor.render_themed(area, frame.buffer_mut(), &self.theme);
         }
+
+        // Session browser overlay
+        if let Some(browser) = &self.session_browser {
+            let area = frame.area();
+            browser.render_themed(area, frame.buffer_mut(), &self.theme);
+        }
     }
 
     fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
@@ -750,6 +788,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If session browser is open, handle its keys
+        if self.session_browser.is_some() {
+            self.handle_session_browser_key(key).await;
+            return;
+        }
+
         // If keybind editor is open, handle its keys (including capture mode)
         if self.keybind_editor.is_some() {
             self.handle_keybind_editor_key(key);
@@ -798,6 +842,7 @@ impl App {
                 "dashboard" => Action::Dashboard,
                 "dashboard_nav" => Action::DashboardNav,
                 "keybinds" => Action::Keybinds,
+                "session_browser" => Action::SessionBrowser,
                 "clear_screen" => Action::ClearScreen,
                 "scroll_up" => Action::ScrollUp,
                 "scroll_down" => Action::ScrollDown,
@@ -901,7 +946,7 @@ impl App {
                 self.should_quit = true;
             }
             Action::ModelPicker if !self.processing => {
-                self.model_picker = Some(ModelPicker::with_detected_clis(&self.detected_clis));
+                self.model_picker = Some(ModelPicker::with_all(&self.detected_clis, &self.registry_models));
             }
             Action::CommandPalette if !self.processing => {
                 self.command_palette = Some(CommandPalette::new(&self.skills));
@@ -923,8 +968,43 @@ impl App {
             Action::Keybinds if !self.processing => {
                 self.keybind_editor = Some(KeybindEditor::new());
             }
+            Action::SessionBrowser if !self.processing => {
+                self.session_browser = Some(SessionBrowser::new());
+            }
             Action::Dashboard if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_session_browser_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                self.session_browser = None;
+            }
+            KeyCode::Up => {
+                if let Some(browser) = &mut self.session_browser {
+                    browser.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(browser) = &mut self.session_browser {
+                    browser.move_down();
+                }
+            }
+            KeyCode::Enter => {
+                let session_id = self
+                    .session_browser
+                    .as_ref()
+                    .and_then(|b| b.selected_session())
+                    .map(|s| s.id.clone());
+                self.session_browser = None;
+
+                if let Some(id) = session_id {
+                    self.resume_session(&id).await;
+                }
             }
             _ => {}
         }
@@ -1180,7 +1260,7 @@ impl App {
                             self.scroll_offset = 0;
                         }
                         "model" => {
-                            self.model_picker = Some(ModelPicker::with_detected_clis(&self.detected_clis));
+                            self.model_picker = Some(ModelPicker::with_all(&self.detected_clis, &self.registry_models));
                         }
                         "dashboard" => {
                             self.dashboard_nav = Some(DashboardNav::new());
@@ -1208,6 +1288,45 @@ impl App {
                         }
                         "keybinds" => {
                             self.keybind_editor = Some(KeybindEditor::new());
+                        }
+                        "extraction-model" => {
+                            if let Some(client) = &self.signet_client {
+                                if args.is_empty() {
+                                    // Show current extraction model
+                                    match client.get("/api/config").await {
+                                        Ok(cfg) => {
+                                            let model = cfg
+                                                .pointer("/pipelineV2/extraction/model")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("unknown");
+                                            self.entries.push(ChatEntry::Status(format!(
+                                                "Extraction model: {model}. Usage: /extraction-model <model>"
+                                            )));
+                                        }
+                                        Err(e) => {
+                                            self.entries.push(ChatEntry::Error(format!("Failed to read config: {e}")));
+                                        }
+                                    }
+                                } else {
+                                    // Update extraction model via daemon
+                                    let body = serde_json::json!({
+                                        "path": "pipelineV2.extraction.model",
+                                        "value": args
+                                    });
+                                    match client.post("/api/config", &body).await {
+                                        Ok(_) => {
+                                            self.entries.push(ChatEntry::Status(format!(
+                                                "Extraction model set to: {args}"
+                                            )));
+                                        }
+                                        Err(e) => {
+                                            self.entries.push(ChatEntry::Error(format!("Failed to update: {e}")));
+                                        }
+                                    }
+                                }
+                            } else {
+                                self.entries.push(ChatEntry::Error("No daemon connection".to_string()));
+                            }
                         }
                         "effort" => {
                             if args.is_empty() {
@@ -1788,6 +1907,34 @@ impl App {
     }
 
     /// Load a previous session from SQLite (for --resume)
+    /// Resume a specific session by ID
+    async fn resume_session(&mut self, session_id: &str) {
+        let store = match &self.session_store {
+            Some(s) => s,
+            None => {
+                self.entries.push(ChatEntry::Error("No session store".to_string()));
+                return;
+            }
+        };
+        match store.load_messages(session_id) {
+            Ok(messages) if !messages.is_empty() => {
+                let count = messages.len();
+                let mut s = self.session.lock().await;
+                s.messages = messages;
+                drop(s);
+                self.entries.push(ChatEntry::Status(format!(
+                    "Resumed session {session_id} ({count} messages)"
+                )));
+            }
+            Ok(_) => {
+                self.entries.push(ChatEntry::Status("Session has no messages.".to_string()));
+            }
+            Err(e) => {
+                self.entries.push(ChatEntry::Error(format!("Failed to load session: {e}")));
+            }
+        }
+    }
+
     pub async fn resume_last_session(&mut self) -> bool {
         let store = match &self.session_store {
             Some(s) => s,

@@ -97,6 +97,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             description: "Show current key bindings (edit ~/.config/forge/keybinds.json)",
             kind: CommandKind::Internal("keybinds"),
         },
+        SignetCommand {
+            key: "extraction-model",
+            label: "/extraction-model <model>",
+            description: "View or change the Signet extraction pipeline model",
+            kind: CommandKind::Internal("extraction-model"),
+        },
         // Status & Diagnostics
         SignetCommand {
             key: "status",

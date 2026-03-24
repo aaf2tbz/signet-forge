@@ -20,6 +20,7 @@ pub const KEYBIND_ACTIONS: &[(&str, &str, &str)] = &[
     ("newline", "Insert Newline", "Shift+Enter"),
     ("paste", "Paste", "Ctrl+V"),
     ("keybinds", "Keybind Editor", "Ctrl+B"),
+    ("session_browser", "Session Browser", "Ctrl+H"),
 ];
 
 /// Stored keybinding configuration

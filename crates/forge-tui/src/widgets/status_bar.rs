@@ -103,6 +103,7 @@ impl<'a> Widget for StatusBar<'a> {
                 ("cancel", "Cancel"),
                 ("quit", "Quit"),
                 ("keybinds", "Keybinds"),
+                ("session_browser", "Sessions"),
             ];
 
             let mut spans = vec![Span::styled(" ", border)];

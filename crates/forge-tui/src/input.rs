@@ -47,6 +47,8 @@ pub enum Action {
     TabComplete,
     /// Open keybind editor
     Keybinds,
+    /// Open session browser
+    SessionBrowser,
     /// No action
     None,
 }
@@ -84,6 +86,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::CONTROL, KeyCode::Char('g')) => Action::SignetCommands,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => Action::Dashboard,
         (KeyModifiers::CONTROL, KeyCode::Char('b')) => Action::Keybinds,
+        (KeyModifiers::CONTROL, KeyCode::Char('h')) => Action::SessionBrowser,
 
         // Character input
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => Action::InsertChar(c),
