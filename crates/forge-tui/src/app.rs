@@ -354,9 +354,7 @@ impl App {
                     }
                     Event::Paste(text) => {
                         // Bracketed paste — handle file drops and multi-line paste
-                        if !self.processing {
-                            self.handle_paste(&text);
-                        }
+                        self.handle_paste(&text);
                     }
                     _ => {}
                 }
@@ -545,18 +543,14 @@ impl App {
         };
         chat.render(chunks[1], frame.buffer_mut());
 
-        // Input area — themed
-        let input_style = if self.processing {
-            Style::default().fg(self.theme.muted)
-        } else {
-            Style::default().fg(self.theme.fg)
-        };
+        // Input area — always active so users can type ahead
+        let input_style = Style::default().fg(self.theme.fg);
 
         let input_block = Block::default()
             .borders(Borders::TOP)
             .border_style(Style::default().fg(self.theme.border));
 
-        let input_text = if self.input.is_empty() && !self.processing {
+        let input_text = if self.input.is_empty() {
             Paragraph::new(Span::styled(
                 " Type a message...",
                 Style::default().fg(self.theme.muted),
@@ -569,12 +563,12 @@ impl App {
         frame.render_widget(input_widget, chunks[2]);
 
         // Slash command autocomplete dropdown
-        if !self.processing && self.input.starts_with('/') && self.input.len() < 30 {
+        if self.input.starts_with('/') && self.input.len() < 30 {
             signet_commands::render_autocomplete(&self.input, chunks[2], frame.buffer_mut(), &self.theme);
         }
 
-        // Position cursor
-        if !self.processing && self.permission_dialog.is_none() {
+        // Position cursor — always visible so users can type ahead during processing
+        if self.permission_dialog.is_none() {
             frame.set_cursor_position((chunks[2].x + 3 + self.cursor as u16, chunks[2].y + 1));
         }
 
@@ -770,7 +764,7 @@ impl App {
                     }));
                 }
             }
-            Action::InsertChar(c) if !self.processing => {
+            Action::InsertChar(c) => {
                 // Clear ephemeral command output when user starts typing
                 if self.input.is_empty() {
                     self.entries.retain(|e| !matches!(e, ChatEntry::Ephemeral(_)));
@@ -780,13 +774,13 @@ impl App {
                 self.cursor += 1;
                 self.last_keystroke = std::time::Instant::now();
             }
-            Action::Backspace if !self.processing && self.cursor > 0 => {
+            Action::Backspace if self.cursor > 0 => {
                 self.last_keystroke = std::time::Instant::now();
                 self.cursor -= 1;
                 let byte_pos = self.cursor_byte_pos();
                 self.input.remove(byte_pos);
             }
-            Action::Delete if !self.processing && self.cursor < self.input_char_len() => {
+            Action::Delete if self.cursor < self.input_char_len() => {
                 let byte_pos = self.cursor_byte_pos();
                 self.input.remove(byte_pos);
             }
@@ -842,7 +836,7 @@ impl App {
             Action::CommandPalette if !self.processing => {
                 self.command_palette = Some(CommandPalette::new(&self.skills));
             }
-            Action::Paste if !self.processing => {
+            Action::Paste => {
                 self.clipboard_paste();
             }
             Action::ClearScreen => {
