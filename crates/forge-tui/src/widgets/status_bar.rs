@@ -66,13 +66,13 @@ impl<'a> Widget for StatusBar<'a> {
                 Span::raw(" model "),
                 Span::styled("^K", Style::default().fg(Color::Yellow)),
                 Span::raw(" cmd "),
-                Span::styled("^Tab", Style::default().fg(Color::Yellow)),
+                Span::styled("^D", Style::default().fg(Color::Yellow)),
                 Span::raw(" dashboard "),
                 Span::styled("^G", Style::default().fg(Color::Yellow)),
-                Span::raw(" Signet Commands "),
+                Span::raw(" signet "),
                 Span::styled("^C", Style::default().fg(Color::Yellow)),
                 Span::raw(" cancel "),
-                Span::styled("^D", Style::default().fg(Color::Yellow)),
+                Span::styled("^Q", Style::default().fg(Color::Yellow)),
                 Span::raw(" quit"),
             ]);
 

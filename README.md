@@ -237,13 +237,21 @@ forge --theme midnight
 | `Enter` | Send message |
 | `Ctrl+O` | Model picker — switch provider/model mid-session |
 | `Ctrl+K` | Command palette — search commands and skills |
-| `Ctrl+H` | Signet command picker — diagnostics, repair, management |
-| `F2` | Open Signet dashboard in browser |
+| `Ctrl+G` | Signet command picker — diagnostics, repair, management |
+| `Ctrl+D` | Open Signet dashboard in browser |
 | `Ctrl+C` | Cancel current generation |
-| `Ctrl+D` | Quit (auto-saves session, submits transcript for extraction) |
+| `Ctrl+Q` | Quit (auto-saves session, submits transcript for extraction) |
 | `Ctrl+L` | Clear chat |
 | `PageUp/Down` | Scroll history |
 | `Y/A/N` | Permission dialog (Allow / Always Allow / Deny) |
+
+### Slash Command Autocomplete
+
+Type `/` in the input to see a filtered list of all available commands as greyed-out suggestions. Keep typing to narrow results — e.g., `/rep` shows only repair commands. Built-in commands include `/help`, `/clear`, `/model`, `/dashboard`, `/resume`, `/recall <query>`, `/remember <text>`, plus all Signet diagnostic and management commands.
+
+### CLI Model Switching
+
+When using a CLI provider (e.g., `claude-cli`), the model picker (Ctrl+O) shows CLI-compatible models first — selecting one stays on the CLI and passes `--model` to the binary. API models are listed below if you want to switch away from the CLI entirely.
 
 ## Why Forge Instead of Connectors
 

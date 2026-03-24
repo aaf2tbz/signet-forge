@@ -94,6 +94,8 @@ pub struct App {
     model: String,
     provider_name: String,
     context_window: usize,
+    /// CLI binary path (if using a CLI provider)
+    cli_path: Option<String>,
     /// Memories recalled for current prompt
     memories_injected: usize,
     /// Total memories in database
@@ -148,6 +150,7 @@ impl App {
         provider: Arc<dyn Provider>,
         signet_client: Option<SignetClient>,
         system_prompt: String,
+        cli_path: Option<String>,
     ) -> Self {
         let model = provider.model().to_string();
         let provider_name = provider.name().to_string();
@@ -263,6 +266,7 @@ impl App {
             model,
             provider_name,
             context_window,
+            cli_path,
             memories_injected,
             total_memories,
             daemon_healthy,
@@ -477,6 +481,11 @@ impl App {
         let input_widget = input_text.block(input_block);
         frame.render_widget(input_widget, chunks[2]);
 
+        // Slash command autocomplete dropdown
+        if !self.processing && self.input.starts_with('/') && self.input.len() < 30 {
+            signet_commands::render_autocomplete(&self.input, chunks[2], frame.buffer_mut());
+        }
+
         // Position cursor
         if !self.processing && self.permission_dialog.is_none() {
             frame.set_cursor_position((chunks[2].x + 3 + self.cursor as u16, chunks[2].y + 1));
@@ -666,7 +675,15 @@ impl App {
                 self.should_quit = true;
             }
             Action::ModelPicker if !self.processing => {
-                self.model_picker = Some(ModelPicker::new());
+                // If currently on a CLI provider, show CLI models first
+                if self.provider_name.ends_with("-cli") {
+                    // Find the CLI path from the current provider
+                    let cli_path = self.cli_path.clone().unwrap_or_default();
+                    self.model_picker =
+                        Some(ModelPicker::with_cli(&self.provider_name, &cli_path));
+                } else {
+                    self.model_picker = Some(ModelPicker::new());
+                }
             }
             Action::CommandPalette if !self.processing => {
                 self.command_palette = Some(CommandPalette::new(&self.skills));
@@ -758,15 +775,9 @@ impl App {
             None => (trimmed, ""),
         };
 
-        // Special commands
+        // Commands with arguments
         match cmd_name {
-            "signet-help" | "help" => {
-                let help = signet_commands::help_text();
-                self.entries.push(ChatEntry::AssistantText(help));
-                return;
-            }
             "recall" if !args.is_empty() => {
-                // /recall with args — run signet recall <query>
                 self.entries
                     .push(ChatEntry::Status(format!("◇ Recalling: {args}")));
                 self.run_signet_cli(&["recall", args]).await;
@@ -774,7 +785,7 @@ impl App {
             }
             "remember" if !args.is_empty() => {
                 self.entries
-                    .push(ChatEntry::Status(format!("◇ Storing memory...")));
+                    .push(ChatEntry::Status("◇ Storing memory...".to_string()));
                 self.run_signet_cli(&["remember", args]).await;
                 return;
             }
@@ -784,10 +795,57 @@ impl App {
         // Match against registered commands
         let commands = signet_commands::all_commands();
         if let Some(cmd) = commands.iter().find(|c| c.key == cmd_name) {
-            self.execute_signet_command(cmd).await;
+            match &cmd.kind {
+                signet_commands::CommandKind::Internal(action) => {
+                    match *action {
+                        "help" => {
+                            let help = signet_commands::help_text();
+                            self.entries.push(ChatEntry::AssistantText(help));
+                        }
+                        "clear" => {
+                            self.entries.clear();
+                            self.streaming_text.clear();
+                            self.scroll_offset = 0;
+                        }
+                        "model" => {
+                            self.model_picker = Some(ModelPicker::new());
+                        }
+                        "dashboard" => {
+                            let url = self
+                                .signet_client
+                                .as_ref()
+                                .map(|c| c.base_url().to_string())
+                                .unwrap_or_else(|| "http://localhost:3850".to_string());
+                            let _ = std::process::Command::new("open")
+                                .arg(&url)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                            self.entries
+                                .push(ChatEntry::Status(format!("Dashboard: {url}")));
+                        }
+                        "resume" => {
+                            self.resume_last_session().await;
+                        }
+                        "compact" => {
+                            self.entries
+                                .push(ChatEntry::Status("Context compaction is automatic at 90% capacity.".to_string()));
+                        }
+                        "theme" => {
+                            self.entries.push(ChatEntry::Status(
+                                "Themes: signet-dark, signet-light, midnight, amber. Use --theme flag on launch.".to_string(),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {
+                    self.execute_signet_command(cmd).await;
+                }
+            }
         } else {
             self.entries.push(ChatEntry::Error(format!(
-                "Unknown command: /{cmd_name}. Type /signet-help for available commands."
+                "Unknown command: /{cmd_name}. Type /help for available commands."
             )));
         }
     }
@@ -844,6 +902,9 @@ impl App {
                         "Signet daemon not connected".to_string(),
                     ));
                 }
+            }
+            signet_commands::CommandKind::Internal(_) => {
+                // Internal commands are handled in handle_slash_command directly
             }
         }
     }
@@ -1001,20 +1062,45 @@ impl App {
                 self.model_picker = None;
 
                 if let Some(entry) = selection {
-                    self.switch_model(&entry.provider, &entry.model, entry.context_window)
-                        .await;
+                    self.switch_model_entry(&entry).await;
                 }
             }
             _ => {}
         }
     }
 
-    async fn switch_model(&mut self, provider_name: &str, model: &str, context_window: usize) {
-        // Resolve API key for the new provider
-        let api_key = if provider_name == "ollama" {
-            String::new()
+    async fn switch_model_entry(&mut self, entry: &crate::views::model_picker::ModelEntry) {
+        self.switch_model(&entry.provider, &entry.model, entry.context_window, entry.cli_path.clone()).await;
+    }
+
+    async fn switch_model(&mut self, provider_name: &str, model: &str, context_window: usize, new_cli_path: Option<String>) {
+        // Create new provider — CLI or API based
+        let new_provider: Arc<dyn Provider> = if let Some(cli_path) = &new_cli_path {
+            // CLI provider — no API key needed
+            let kind = match provider_name {
+                "claude-cli" => forge_provider::cli::CliKind::Claude,
+                "codex-cli" => forge_provider::cli::CliKind::Codex,
+                "gemini-cli" => forge_provider::cli::CliKind::Gemini,
+                _ => {
+                    self.entries.push(ChatEntry::Error(format!(
+                        "Unknown CLI provider: {provider_name}"
+                    )));
+                    return;
+                }
+            };
+            Arc::from(forge_provider::create_cli_provider(kind, cli_path, model))
+        } else if provider_name == "ollama" {
+            match forge_provider::create_provider(provider_name, model, "") {
+                Ok(p) => Arc::from(p),
+                Err(e) => {
+                    self.entries
+                        .push(ChatEntry::Error(format!("Failed to create provider: {e}")));
+                    return;
+                }
+            }
         } else {
-            match resolve_api_key(self.signet_client.as_ref(), provider_name).await {
+            // API provider — resolve key
+            let api_key = match resolve_api_key(self.signet_client.as_ref(), provider_name).await {
                 Ok(key) => key,
                 Err(e) => {
                     self.entries.push(ChatEntry::Error(format!(
@@ -1022,11 +1108,7 @@ impl App {
                     )));
                     return;
                 }
-            }
-        };
-
-        // Create new provider
-        let new_provider: Arc<dyn Provider> =
+            };
             match forge_provider::create_provider(provider_name, model, &api_key) {
                 Ok(p) => Arc::from(p),
                 Err(e) => {
@@ -1034,7 +1116,8 @@ impl App {
                         .push(ChatEntry::Error(format!("Failed to create provider: {e}")));
                     return;
                 }
-            };
+            }
+        };
 
         // Rebuild agent with new provider
         let cwd = std::env::current_dir()
@@ -1063,6 +1146,7 @@ impl App {
         self.model = model.to_string();
         self.provider_name = provider_name.to_string();
         self.context_window = context_window;
+        self.cli_path = new_cli_path;
 
         self.entries.push(ChatEntry::Status(format!(
             "Switched to {} ({})",

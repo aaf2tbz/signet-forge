@@ -13,6 +13,8 @@ pub struct ModelEntry {
     pub model: String,
     pub display_name: String,
     pub context_window: usize,
+    /// If this is a CLI provider entry, the CLI path
+    pub cli_path: Option<String>,
 }
 
 /// State for the model picker overlay
@@ -26,6 +28,69 @@ impl ModelPicker {
     pub fn new() -> Self {
         Self {
             models: default_models(),
+            selected: 0,
+            filter: String::new(),
+        }
+    }
+
+    /// Create a picker that includes CLI provider models for the current CLI
+    pub fn with_cli(cli_provider: &str, cli_path: &str) -> Self {
+        let mut models = Vec::new();
+
+        // Add CLI models first based on which CLI is active
+        match cli_provider {
+            "claude-cli" => {
+                for (model, name, ctx) in &[
+                    ("claude-opus-4-6", "Claude Opus 4.6", 200_000),
+                    ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
+                    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200_000),
+                ] {
+                    models.push(ModelEntry {
+                        provider: "claude-cli".into(),
+                        model: model.to_string(),
+                        display_name: format!("{name} (CLI)"),
+                        context_window: *ctx,
+                        cli_path: Some(cli_path.to_string()),
+                    });
+                }
+            }
+            "codex-cli" => {
+                for (model, name, ctx) in &[
+                    ("o4-mini", "o4-mini", 200_000),
+                    ("gpt-4o", "GPT-4o", 128_000),
+                    ("codex", "Codex (default)", 200_000),
+                ] {
+                    models.push(ModelEntry {
+                        provider: "codex-cli".into(),
+                        model: model.to_string(),
+                        display_name: format!("{name} (CLI)"),
+                        context_window: *ctx,
+                        cli_path: Some(cli_path.to_string()),
+                    });
+                }
+            }
+            "gemini-cli" => {
+                for (model, name, ctx) in &[
+                    ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
+                    ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000),
+                ] {
+                    models.push(ModelEntry {
+                        provider: "gemini-cli".into(),
+                        model: model.to_string(),
+                        display_name: format!("{name} (CLI)"),
+                        context_window: *ctx,
+                        cli_path: Some(cli_path.to_string()),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        // Add standard API models too (user might want to switch away from CLI)
+        models.extend(default_models());
+
+        Self {
+            models,
             selected: 0,
             filter: String::new(),
         }
@@ -173,77 +238,16 @@ fn format_context(tokens: usize) -> String {
 
 fn default_models() -> Vec<ModelEntry> {
     vec![
-        // Anthropic
-        ModelEntry {
-            provider: "anthropic".into(),
-            model: "claude-opus-4-6".into(),
-            display_name: "Claude Opus 4.6".into(),
-            context_window: 200_000,
-        },
-        ModelEntry {
-            provider: "anthropic".into(),
-            model: "claude-sonnet-4-6".into(),
-            display_name: "Claude Sonnet 4.6".into(),
-            context_window: 200_000,
-        },
-        ModelEntry {
-            provider: "anthropic".into(),
-            model: "claude-haiku-4-5-20251001".into(),
-            display_name: "Claude Haiku 4.5".into(),
-            context_window: 200_000,
-        },
-        // OpenAI
-        ModelEntry {
-            provider: "openai".into(),
-            model: "gpt-4o".into(),
-            display_name: "GPT-4o".into(),
-            context_window: 128_000,
-        },
-        ModelEntry {
-            provider: "openai".into(),
-            model: "gpt-4o-mini".into(),
-            display_name: "GPT-4o Mini".into(),
-            context_window: 128_000,
-        },
-        ModelEntry {
-            provider: "openai".into(),
-            model: "o4-mini".into(),
-            display_name: "o4-mini".into(),
-            context_window: 200_000,
-        },
-        // Google
-        ModelEntry {
-            provider: "gemini".into(),
-            model: "gemini-2.5-flash".into(),
-            display_name: "Gemini 2.5 Flash".into(),
-            context_window: 1_000_000,
-        },
-        ModelEntry {
-            provider: "gemini".into(),
-            model: "gemini-2.5-pro".into(),
-            display_name: "Gemini 2.5 Pro".into(),
-            context_window: 1_000_000,
-        },
-        // Groq
-        ModelEntry {
-            provider: "groq".into(),
-            model: "llama-3.3-70b-versatile".into(),
-            display_name: "Llama 3.3 70B (Groq)".into(),
-            context_window: 128_000,
-        },
-        // Ollama
-        ModelEntry {
-            provider: "ollama".into(),
-            model: "qwen3:4b".into(),
-            display_name: "Qwen3 4B (Local)".into(),
-            context_window: 32_768,
-        },
-        // OpenRouter
-        ModelEntry {
-            provider: "openrouter".into(),
-            model: "anthropic/claude-sonnet-4-6".into(),
-            display_name: "Claude Sonnet 4.6 (OpenRouter)".into(),
-            context_window: 200_000,
-        },
+        ModelEntry { provider: "anthropic".into(), model: "claude-opus-4-6".into(), display_name: "Claude Opus 4.6".into(), context_window: 200_000, cli_path: None },
+        ModelEntry { provider: "anthropic".into(), model: "claude-sonnet-4-6".into(), display_name: "Claude Sonnet 4.6".into(), context_window: 200_000, cli_path: None },
+        ModelEntry { provider: "anthropic".into(), model: "claude-haiku-4-5-20251001".into(), display_name: "Claude Haiku 4.5".into(), context_window: 200_000, cli_path: None },
+        ModelEntry { provider: "openai".into(), model: "gpt-4o".into(), display_name: "GPT-4o".into(), context_window: 128_000, cli_path: None },
+        ModelEntry { provider: "openai".into(), model: "gpt-4o-mini".into(), display_name: "GPT-4o Mini".into(), context_window: 128_000, cli_path: None },
+        ModelEntry { provider: "openai".into(), model: "o4-mini".into(), display_name: "o4-mini".into(), context_window: 200_000, cli_path: None },
+        ModelEntry { provider: "gemini".into(), model: "gemini-2.5-flash".into(), display_name: "Gemini 2.5 Flash".into(), context_window: 1_000_000, cli_path: None },
+        ModelEntry { provider: "gemini".into(), model: "gemini-2.5-pro".into(), display_name: "Gemini 2.5 Pro".into(), context_window: 1_000_000, cli_path: None },
+        ModelEntry { provider: "groq".into(), model: "llama-3.3-70b-versatile".into(), display_name: "Llama 3.3 70B (Groq)".into(), context_window: 128_000, cli_path: None },
+        ModelEntry { provider: "ollama".into(), model: "qwen3:4b".into(), display_name: "Qwen3 4B (Local)".into(), context_window: 32_768, cli_path: None },
+        ModelEntry { provider: "openrouter".into(), model: "anthropic/claude-sonnet-4-6".into(), display_name: "Claude Sonnet 4.6 (OpenRouter)".into(), context_window: 200_000, cli_path: None },
     ]
 }

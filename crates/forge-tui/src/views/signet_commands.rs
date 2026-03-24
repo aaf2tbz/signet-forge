@@ -22,11 +22,62 @@ pub enum CommandKind {
     /// Call a daemon API endpoint
     ApiGet(&'static str),
     ApiPost(&'static str),
+    /// Handled internally by the TUI
+    Internal(&'static str),
 }
 
 /// All available Signet commands
 pub fn all_commands() -> Vec<SignetCommand> {
     vec![
+        // Basic / built-in commands
+        SignetCommand {
+            key: "help",
+            label: "/help",
+            description: "Show all available commands",
+            kind: CommandKind::Internal("help"),
+        },
+        SignetCommand {
+            key: "signet-help",
+            label: "/signet-help",
+            description: "Show all Signet commands",
+            kind: CommandKind::Internal("help"),
+        },
+        SignetCommand {
+            key: "clear",
+            label: "/clear",
+            description: "Clear the chat history",
+            kind: CommandKind::Internal("clear"),
+        },
+        SignetCommand {
+            key: "model",
+            label: "/model",
+            description: "Open model picker (same as Ctrl+O)",
+            kind: CommandKind::Internal("model"),
+        },
+        SignetCommand {
+            key: "compact",
+            label: "/compact",
+            description: "Force context compaction",
+            kind: CommandKind::Internal("compact"),
+        },
+        SignetCommand {
+            key: "resume",
+            label: "/resume",
+            description: "Resume the last saved session",
+            kind: CommandKind::Internal("resume"),
+        },
+        SignetCommand {
+            key: "dashboard",
+            label: "/dashboard",
+            description: "Open Signet dashboard in browser",
+            kind: CommandKind::Internal("dashboard"),
+        },
+        SignetCommand {
+            key: "theme",
+            label: "/theme <name>",
+            description: "Switch theme (signet-dark, signet-light, midnight, amber)",
+            kind: CommandKind::Internal("theme"),
+        },
         // Status & Diagnostics
         SignetCommand {
             key: "status",
@@ -353,4 +404,78 @@ pub fn help_text() -> String {
     }
     text.push_str("\n  Press Ctrl+G to open the interactive command picker.\n");
     text
+}
+
+/// Render a slash command autocomplete dropdown above the input area.
+/// Shows filtered commands as greyed-out suggestions.
+pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer) {
+    let query = input.trim_start_matches('/');
+    if query.is_empty() {
+        // Show all commands when just "/" is typed
+        render_suggestions(&all_commands(), area, buf);
+        return;
+    }
+
+    let query_lower = query.to_lowercase();
+    let matches: Vec<SignetCommand> = all_commands()
+        .into_iter()
+        .filter(|c| c.key.starts_with(&query_lower) || c.label.contains(&query_lower))
+        .collect();
+
+    if !matches.is_empty() {
+        render_suggestions(&matches, area, buf);
+    }
+}
+
+fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer) {
+    // Show max 8 suggestions, positioned above the input area
+    let max_show = 8.min(commands.len());
+    let height = (max_show + 1) as u16; // +1 for border
+    let width = 50u16.min(area.width.saturating_sub(4));
+
+    // Position above the input area (area is the input rect)
+    let y = area.y.saturating_sub(height + 1);
+    let x = area.x + 2;
+    let popup = Rect::new(x, y, width, height);
+
+    // Clear background
+    for row in popup.y..popup.y + popup.height {
+        for col in popup.x..popup.x + popup.width {
+            if col < buf.area().width && row < buf.area().height {
+                buf[(col, row)]
+                    .set_char(' ')
+                    .set_bg(Color::Rgb(25, 25, 25));
+            }
+        }
+    }
+
+    // Render each suggestion
+    for (i, cmd) in commands.iter().take(max_show).enumerate() {
+        let row = popup.y + i as u16;
+        if row >= buf.area().height {
+            break;
+        }
+
+        let label_span = Span::styled(
+            format!(" {:<18}", cmd.label),
+            Style::default().fg(Color::DarkGray),
+        );
+        let desc_span = Span::styled(
+            cmd.description,
+            Style::default().fg(Color::Rgb(60, 60, 60)),
+        );
+        let line = Line::from(vec![label_span, desc_span]);
+        buf.set_line(popup.x, row, &line, popup.width);
+    }
+
+    if commands.len() > max_show {
+        let more_row = popup.y + max_show as u16;
+        if more_row < buf.area().height {
+            let more = Span::styled(
+                format!(" ... {} more", commands.len() - max_show),
+                Style::default().fg(Color::Rgb(50, 50, 50)),
+            );
+            buf.set_line(popup.x, more_row, &Line::from(more), popup.width);
+        }
+    }
 }

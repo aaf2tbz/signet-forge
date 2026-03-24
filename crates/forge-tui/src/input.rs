@@ -31,11 +31,11 @@ pub enum Action {
     ModelPicker,
     /// Open command palette
     CommandPalette,
-    /// Toggle dashboard
+    /// Open dashboard
     Dashboard,
     /// Clear screen
     ClearScreen,
-    /// Open Signet command picker (Ctrl+G)
+    /// Open Signet command picker
     SignetCommands,
     /// Insert newline in input
     NewLine,
@@ -46,9 +46,9 @@ pub enum Action {
 /// Map a key event to an action
 pub fn key_to_action(key: KeyEvent) -> Action {
     match (key.modifiers, key.code) {
-        // Quit
+        // Cancel / Quit
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Action::Cancel,
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => Action::Quit,
+        (KeyModifiers::CONTROL, KeyCode::Char('q')) => Action::Quit,
 
         // Submit
         (KeyModifiers::NONE, KeyCode::Enter) => Action::Submit,
@@ -70,9 +70,8 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::CONTROL, KeyCode::Char('o')) => Action::ModelPicker,
         (KeyModifiers::CONTROL, KeyCode::Char('k')) => Action::CommandPalette,
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => Action::ClearScreen,
-
         (KeyModifiers::CONTROL, KeyCode::Char('g')) => Action::SignetCommands,
-        (KeyModifiers::CONTROL, KeyCode::Tab) => Action::Dashboard,
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => Action::Dashboard,
 
         // Character input
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => Action::InsertChar(c),

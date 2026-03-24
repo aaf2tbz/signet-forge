@@ -117,8 +117,9 @@ async fn main() -> Result<()> {
     info!("Forge starting — provider: {provider_name}, model: {model}");
 
     // Create provider — CLI providers use installed binaries, API providers need keys
-    let provider: Arc<dyn forge_provider::Provider> = if let Some(cli_path) =
-        find_cli_path(&provider_name, &available)
+    let active_cli_path = find_cli_path(&provider_name, &available);
+    let provider: Arc<dyn forge_provider::Provider> = if let Some(ref cli_path) =
+        active_cli_path
     {
         // CLI provider — no API key needed, the CLI handles auth
         let kind = match provider_name.as_str() {
@@ -166,7 +167,7 @@ async fn main() -> Result<()> {
 
     // Interactive TUI mode
     let mut terminal = ratatui::init();
-    let mut app = App::new(provider, signet_client, system_prompt).await;
+    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path).await;
 
     if cli.resume {
         app.resume_last_session().await;
