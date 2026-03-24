@@ -222,6 +222,14 @@ impl AgentLoop {
                             input,
                         });
                     }
+                    StreamEvent::ToolResult { name, output, is_error } => {
+                        let _ = self.event_tx.send(AgentEvent::ToolResult {
+                            id: String::new(),
+                            name,
+                            output,
+                            is_error,
+                        }).await;
+                    }
                     StreamEvent::Usage(usage) => {
                         {
                             let mut s = session.lock().await;

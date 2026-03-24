@@ -385,6 +385,25 @@ impl Provider for CliProvider {
                                 // Could be end of tool_use block
                                 send!(StreamEvent::ToolUseEnd);
                             }
+                            "tool_result" | "tool_output" => {
+                                // CLI-managed tool execution result
+                                let name = parsed.get("tool_name")
+                                    .or_else(|| parsed.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("tool")
+                                    .to_string();
+                                let output = parsed.get("output")
+                                    .or_else(|| parsed.get("content"))
+                                    .map(|v| {
+                                        if let Some(s) = v.as_str() { s.to_string() }
+                                        else { v.to_string() }
+                                    })
+                                    .unwrap_or_default();
+                                let is_error = parsed.get("is_error")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                send!(StreamEvent::ToolResult { name, output, is_error });
+                            }
                             "result" => {
                                 if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
                                     if !result.is_empty() {

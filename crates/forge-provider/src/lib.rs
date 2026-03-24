@@ -20,6 +20,8 @@ pub enum StreamEvent {
     ToolUseInput(String),
     /// The current tool use block is complete
     ToolUseEnd,
+    /// Tool execution result (from CLI-managed tools)
+    ToolResult { name: String, output: String, is_error: bool },
     /// Token usage statistics
     Usage(TokenUsage),
     /// Stream is complete
