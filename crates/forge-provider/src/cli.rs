@@ -220,8 +220,32 @@ impl Provider for CliProvider {
             .try_clone_reader()
             .map_err(|e| ForgeError::provider(format!("Failed to clone PTY reader: {e}")))?;
 
+        // Keep master alive so we can drop it to signal EOF when child exits
+        let master = pair.master;
+
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
         let cli_kind = self.cli_kind;
+
+        // Spawn a watcher thread: when the child exits, drop the PTY master
+        // to send EOF to the reader thread (prevents hanging on macOS).
+        let tx_watcher = tx.clone();
+        std::thread::spawn(move || {
+            match child.wait() {
+                Ok(status) => {
+                    if !status.success() {
+                        let code = status.exit_code();
+                        let err_msg = format!("CLI exited with code {code}");
+                        warn!("{err_msg}");
+                        let _ = tx_watcher.blocking_send(StreamEvent::Error(err_msg));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx_watcher.blocking_send(StreamEvent::Error(format!("CLI process error: {e}")));
+                }
+            }
+            // Drop master — sends EOF to the reader thread
+            drop(master);
+        });
 
         // Read PTY output on a blocking thread with large buffer (64KB like WindowedClaude)
         // to handle burst output from agent/bash tool runs without backpressure.
@@ -418,21 +442,7 @@ impl Provider for CliProvider {
                 } // end while let Some(nl) — line splitting
             } // end 'outer loop — chunk reading
 
-            // Wait for the process to finish
-            match child.wait() {
-                Ok(status) => {
-                    if !status.success() {
-                        let code = status.exit_code();
-                        let err_msg = format!("CLI exited with code {code}");
-                        warn!("{err_msg}");
-                        let _ = tx.blocking_send(StreamEvent::Error(err_msg));
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.blocking_send(StreamEvent::Error(format!("CLI process error: {e}")));
-                }
-            }
-
+            // Reader loop exited (EOF from master drop or process exit)
             let _ = tx.blocking_send(StreamEvent::Done);
         });
 
