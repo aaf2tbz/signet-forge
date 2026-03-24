@@ -94,7 +94,7 @@ impl<'a> Widget for StatusBar<'a> {
                 Span::styled(" model ", Style::default().fg(self.status_fg)),
                 Span::styled("^K", Style::default().fg(self.accent)),
                 Span::styled(" cmd ", Style::default().fg(self.status_fg)),
-                Span::styled("^Tab", Style::default().fg(self.accent)),
+                Span::styled("^D", Style::default().fg(self.accent)),
                 Span::styled(" dashboard ", Style::default().fg(self.status_fg)),
                 Span::styled("^G", Style::default().fg(self.accent)),
                 Span::styled(" signet ", Style::default().fg(self.status_fg)),

@@ -438,6 +438,10 @@ impl App {
     fn draw(&self, frame: &mut Frame) {
         let area = frame.area();
 
+        // Fill the entire terminal with the theme background
+        let bg_block = Block::default().style(Style::default().bg(self.theme.bg));
+        frame.render_widget(bg_block, area);
+
         // Layout: [status_bar(2)] [chat(flex)] [input(3)]
         let chunks = Layout::vertical([
             Constraint::Length(2),  // status bar
