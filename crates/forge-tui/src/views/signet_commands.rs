@@ -84,6 +84,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             description: "Set reasoning effort (low, medium, high)",
             kind: CommandKind::Internal("effort"),
         },
+        SignetCommand {
+            key: "keybinds",
+            label: "/keybinds",
+            description: "Show current key bindings (edit ~/.config/forge/keybinds.json)",
+            kind: CommandKind::Internal("keybinds"),
+        },
         // Status & Diagnostics
         SignetCommand {
             key: "status",

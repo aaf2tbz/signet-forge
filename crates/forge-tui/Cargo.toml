@@ -20,3 +20,4 @@ pulldown-cmark = { workspace = true }
 syntect = { workspace = true }
 arboard = { workspace = true }
 tracing = { workspace = true }
+dirs = { workspace = true }

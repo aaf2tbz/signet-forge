@@ -1,4 +1,5 @@
-use crate::input::{key_to_action, Action};
+use crate::input::Action;
+use crate::keybinds::KeyBindConfig;
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
 use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPalette};
 use crate::views::model_picker::ModelPicker;
@@ -96,6 +97,8 @@ pub struct App {
     context_window: usize,
     /// Active color theme
     theme: crate::theme::Theme,
+    /// Keybinding configuration (loaded from ~/.config/forge/keybinds.json)
+    keybinds: KeyBindConfig,
     /// CLI binary path (if using a CLI provider)
     cli_path: Option<String>,
     /// Current reasoning effort level (shared with agent loop)
@@ -277,6 +280,7 @@ impl App {
             provider_name,
             context_window,
             theme: crate::theme::Theme::by_name(theme_name),
+            keybinds: KeyBindConfig::load(),
             cli_path,
             effort,
             memories_injected,
@@ -630,7 +634,26 @@ impl App {
             return;
         }
 
-        let action = key_to_action(key);
+        // Resolve key event through configurable keybinds first, fall back to input.rs
+        let action = if let Some(action_id) = self.keybinds.resolve(&key) {
+            match action_id {
+                "submit" => Action::Submit,
+                "cancel" => Action::Cancel,
+                "quit" => Action::Quit,
+                "model_picker" => Action::ModelPicker,
+                "command_palette" => Action::CommandPalette,
+                "signet_commands" => Action::SignetCommands,
+                "dashboard" => Action::Dashboard,
+                "clear_screen" => Action::ClearScreen,
+                "scroll_up" => Action::ScrollUp,
+                "scroll_down" => Action::ScrollDown,
+                "newline" => Action::NewLine,
+                _ => Action::None,
+            }
+        } else {
+            // Fall back to hardcoded input handling for basic editing keys
+            crate::input::key_to_action(key)
+        };
 
         match action {
             Action::Submit if !self.processing && !self.input.is_empty() => {
@@ -657,6 +680,10 @@ impl App {
                 }
             }
             Action::InsertChar(c) if !self.processing => {
+                // Clear ephemeral command output when user starts typing
+                if self.input.is_empty() {
+                    self.entries.retain(|e| !matches!(e, ChatEntry::Ephemeral(_)));
+                }
                 self.input.insert(self.cursor, c);
                 self.cursor += 1;
                 self.last_keystroke = std::time::Instant::now();
@@ -834,7 +861,7 @@ impl App {
                     match *action {
                         "help" => {
                             let help = signet_commands::help_text();
-                            self.entries.push(ChatEntry::AssistantText(help));
+                            self.entries.push(ChatEntry::Ephemeral(help));
                         }
                         "clear" => {
                             self.entries.clear();
@@ -884,6 +911,12 @@ impl App {
                                 )));
                             }
                         }
+                        "keybinds" => {
+                            let text = self.keybinds.display_text();
+                            self.entries.push(ChatEntry::Ephemeral(text));
+                            // Save defaults if config doesn't exist yet
+                            let _ = self.keybinds.save();
+                        }
                         "effort" => {
                             if args.is_empty() {
                                 let current = self.effort.lock().await;
@@ -929,7 +962,7 @@ impl App {
                             let formatted =
                                 serde_json::to_string_pretty(&resp).unwrap_or_default();
                             self.entries
-                                .push(ChatEntry::AssistantText(format!("```json\n{formatted}\n```")));
+                                .push(ChatEntry::Ephemeral(format!("```json\n{formatted}\n```")));
                         }
                         Err(e) => {
                             self.entries
@@ -951,7 +984,7 @@ impl App {
                         Ok(resp) => {
                             let formatted =
                                 serde_json::to_string_pretty(&resp).unwrap_or_default();
-                            self.entries.push(ChatEntry::AssistantText(format!(
+                            self.entries.push(ChatEntry::Ephemeral(format!(
                                 "```json\n{formatted}\n```"
                             )));
                         }
@@ -987,7 +1020,7 @@ impl App {
 
                 if !stdout.trim().is_empty() {
                     self.entries
-                        .push(ChatEntry::AssistantText(stdout.trim().to_string()));
+                        .push(ChatEntry::Ephemeral(stdout.trim().to_string()));
                 }
                 if !stderr.trim().is_empty() {
                     self.entries.push(ChatEntry::Error(stderr.trim().to_string()));

@@ -744,6 +744,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "crossterm",
+ "dirs",
  "forge-agent",
  "forge-core",
  "forge-provider",

@@ -23,6 +23,8 @@ pub enum ChatEntry {
     },
     Error(String),
     Status(String),
+    /// Command output that clears when user starts typing
+    Ephemeral(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +96,16 @@ impl<'a> Widget for ChatView<'a> {
                     let md_lines = render_markdown(text);
                     for md_line in md_lines {
                         // Indent markdown lines
+                        let mut indented_spans = vec![Span::raw("  ")];
+                        indented_spans.extend(md_line.spans);
+                        lines.push(Line::from(indented_spans));
+                    }
+                }
+                ChatEntry::Ephemeral(text) => {
+                    // Rendered same as AssistantText — but auto-cleared on typing
+                    lines.push(Line::from(""));
+                    let md_lines = render_markdown(text);
+                    for md_line in md_lines {
                         let mut indented_spans = vec![Span::raw("  ")];
                         indented_spans.extend(md_line.spans);
                         lines.push(Line::from(indented_spans));
