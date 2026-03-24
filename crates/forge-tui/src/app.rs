@@ -96,6 +96,8 @@ pub struct App {
     context_window: usize,
     /// CLI binary path (if using a CLI provider)
     cli_path: Option<String>,
+    /// Current reasoning effort level (shared with agent loop)
+    effort: Arc<Mutex<forge_provider::ReasoningEffort>>,
     /// Memories recalled for current prompt
     memories_injected: usize,
     /// Total memories in database
@@ -208,6 +210,8 @@ impl App {
             "Grep".to_string(),
         ])));
 
+        let effort = Arc::new(Mutex::new(forge_provider::ReasoningEffort::default()));
+
         let agent = Arc::new(AgentLoop::new(
             provider,
             hooks,
@@ -215,6 +219,7 @@ impl App {
             permission_tx,
             Arc::clone(&permissions),
             system_prompt.clone(),
+            Arc::clone(&effort),
         ));
 
         // Start config watcher
@@ -267,6 +272,7 @@ impl App {
             provider_name,
             context_window,
             cli_path,
+            effort,
             memories_injected,
             total_memories,
             daemon_healthy,
@@ -430,6 +436,12 @@ impl App {
         };
 
         // Status bar
+        let effort_str = self
+            .effort
+            .try_lock()
+            .map(|e| e.as_str().to_string())
+            .unwrap_or_else(|_| "medium".to_string());
+
         let status = StatusBar {
             model: &self.model,
             provider: &self.provider_name,
@@ -438,6 +450,7 @@ impl App {
             context_window: self.context_window,
             memories_injected: self.memories_injected,
             total_memories: self.total_memories,
+            effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
         };
         status.render(chunks[0], frame.buffer_mut());
@@ -841,6 +854,21 @@ impl App {
                                 "Themes: signet-dark, signet-light, midnight, amber. Use --theme flag on launch.".to_string(),
                             ));
                         }
+                        "effort" => {
+                            if args.is_empty() {
+                                let current = self.effort.lock().await;
+                                self.entries.push(ChatEntry::Status(format!(
+                                    "Current effort: {}. Usage: /effort low|medium|high",
+                                    current.as_str()
+                                )));
+                            } else {
+                                let new_effort = forge_provider::ReasoningEffort::from_str(args);
+                                *self.effort.lock().await = new_effort;
+                                self.entries.push(ChatEntry::Status(format!(
+                                    "Effort set to: {}", new_effort.as_str()
+                                )));
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1149,6 +1177,7 @@ impl App {
             permission_tx,
             Arc::clone(&self.permissions),
             self.system_prompt.clone(),
+            Arc::clone(&self.effort),
         ));
 
         self.event_rx = event_rx;

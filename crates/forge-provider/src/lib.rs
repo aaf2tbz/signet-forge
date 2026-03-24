@@ -31,6 +31,33 @@ pub enum StreamEvent {
 /// A stream of completion events
 pub type CompletionStream = Pin<Box<dyn Stream<Item = StreamEvent> + Send>>;
 
+/// Reasoning effort level
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ReasoningEffort {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "low" | "l" => Self::Low,
+            "high" | "h" => Self::High,
+            _ => Self::Medium,
+        }
+    }
+}
+
 /// Options for a completion request
 #[derive(Debug, Clone, Default)]
 pub struct CompletionOpts {
@@ -39,6 +66,8 @@ pub struct CompletionOpts {
     pub system_prompt: Option<String>,
     /// For models that support extended thinking / reasoning
     pub thinking: Option<ThinkingConfig>,
+    /// Reasoning effort level (low/medium/high)
+    pub effort: ReasoningEffort,
 }
 
 #[derive(Debug, Clone)]

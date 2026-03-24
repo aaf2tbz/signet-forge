@@ -116,7 +116,14 @@ impl Provider for AnthropicProvider {
         tools: &[ToolDefinition],
         opts: &CompletionOpts,
     ) -> Result<CompletionStream, ForgeError> {
-        let max_tokens = opts.max_tokens.unwrap_or(8192);
+        use crate::ReasoningEffort;
+
+        // Adjust max_tokens and thinking based on effort level
+        let (max_tokens, thinking_budget) = match opts.effort {
+            ReasoningEffort::Low => (opts.max_tokens.unwrap_or(4096), None),
+            ReasoningEffort::Medium => (opts.max_tokens.unwrap_or(8192), None),
+            ReasoningEffort::High => (opts.max_tokens.unwrap_or(16384), Some(10000usize)),
+        };
 
         let mut body = json!({
             "model": self.model,
@@ -125,10 +132,15 @@ impl Provider for AnthropicProvider {
             "stream": true,
         });
 
+        // Extended thinking for high effort
+        if let Some(budget) = thinking_budget {
+            body["thinking"] = json!({
+                "type": "enabled",
+                "budget_tokens": budget,
+            });
+        }
+
         if let Some(system) = &opts.system_prompt {
-            // Use structured system prompt with cache_control for prompt caching.
-            // This caches the system prompt server-side, reducing TTFT on subsequent
-            // calls within a session (tools + base prompt stay the same).
             body["system"] = json!([{
                 "type": "text",
                 "text": system,
@@ -136,9 +148,13 @@ impl Provider for AnthropicProvider {
             }]);
         }
 
-        if let Some(temp) = opts.temperature {
-            body["temperature"] = json!(temp);
-        }
+        // Temperature — lower for high effort (more focused), higher for low
+        let temp = opts.temperature.unwrap_or(match opts.effort {
+            ReasoningEffort::Low => 0.3,
+            ReasoningEffort::Medium => 0.7,
+            ReasoningEffort::High => 0.5,
+        });
+        body["temperature"] = json!(temp);
 
         if !tools.is_empty() {
             body["tools"] = json!(self.build_tools(tools));

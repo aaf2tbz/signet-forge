@@ -32,7 +32,7 @@ impl CliProvider {
     }
 
     /// Build the command arguments for each CLI tool
-    fn build_args(&self, prompt: &str) -> Vec<String> {
+    fn build_args(&self, prompt: &str, effort: crate::ReasoningEffort) -> Vec<String> {
         match self.cli_kind {
             CliKind::Claude => {
                 let mut args = vec![
@@ -46,6 +46,11 @@ impl CliProvider {
                     args.push("--model".to_string());
                     args.push(self.model.clone());
                 }
+                // Pass reasoning effort to Claude CLI
+                if effort != crate::ReasoningEffort::Medium {
+                    args.push("--reasoning-effort".to_string());
+                    args.push(effort.as_str().to_string());
+                }
                 args
             }
             CliKind::Codex => {
@@ -58,6 +63,11 @@ impl CliProvider {
                 if !self.model.is_empty() {
                     args.push("--model".to_string());
                     args.push(self.model.clone());
+                }
+                // Codex supports --reasoning-effort for o-series models
+                if effort != crate::ReasoningEffort::Medium {
+                    args.push("--reasoning-effort".to_string());
+                    args.push(effort.as_str().to_string());
                 }
                 args.push(prompt.to_string());
                 args
@@ -171,7 +181,7 @@ impl Provider for CliProvider {
         opts: &CompletionOpts,
     ) -> Result<CompletionStream, ForgeError> {
         let prompt = Self::build_prompt(messages, opts);
-        let args = self.build_args(&prompt);
+        let args = self.build_args(&prompt, opts.effort);
 
         debug!(
             "Spawning CLI: {} {}",

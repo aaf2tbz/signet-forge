@@ -15,6 +15,7 @@ pub struct StatusBar<'a> {
     pub context_window: usize,
     pub memories_injected: usize,
     pub total_memories: usize,
+    pub effort: &'a str,
     pub daemon_healthy: bool,
 }
 
@@ -40,6 +41,18 @@ impl<'a> Widget for StatusBar<'a> {
             ),
             health_indicator,
             Span::raw(" "),
+            if self.effort != "medium" {
+                Span::styled(
+                    format!("[{}] ", self.effort),
+                    Style::default().fg(if self.effort == "high" {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    }),
+                )
+            } else {
+                Span::raw("")
+            },
             if self.total_memories > 0 {
                 Span::raw(format!(
                     "{} recalled / {} memories",

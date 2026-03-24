@@ -2,7 +2,7 @@ use crate::context::ContextManager;
 use crate::permissions::{PermissionManager, PermissionRequest, PermissionResponse};
 use crate::session::SharedSession;
 use forge_core::{Message, MessageContent, ToolCall, ToolDefinition, TokenUsage};
-use forge_provider::{CompletionOpts, Provider, StreamEvent};
+use forge_provider::{CompletionOpts, Provider, ReasoningEffort, StreamEvent};
 use forge_signet::hooks::SessionHooks;
 use forge_tools;
 use futures::StreamExt;
@@ -50,6 +50,8 @@ pub struct AgentLoop {
     system_prompt: String,
     /// Cached tool definitions — computed once, reused every loop iteration
     tool_definitions: Vec<ToolDefinition>,
+    /// Current reasoning effort level (shared with TUI via Arc<Mutex>)
+    effort: Arc<Mutex<ReasoningEffort>>,
 }
 
 impl AgentLoop {
@@ -60,9 +62,9 @@ impl AgentLoop {
         permission_tx: mpsc::Sender<PermissionRequest>,
         permissions: Arc<Mutex<PermissionManager>>,
         system_prompt: String,
+        effort: Arc<Mutex<ReasoningEffort>>,
     ) -> Self {
         let context_window = provider.context_window();
-        // Cache tool definitions once — no need to rebuild JSON schemas every call
         let tool_definitions = forge_tools::all_definitions();
         Self {
             provider,
@@ -73,6 +75,7 @@ impl AgentLoop {
             context_manager: ContextManager::new(context_window),
             system_prompt,
             tool_definitions,
+            effort,
         }
     }
 
@@ -136,9 +139,12 @@ impl AgentLoop {
                 format!("{}\n\n{}", self.system_prompt, memory_context)
             };
 
+            let current_effort = *self.effort.lock().await;
+
             let opts = CompletionOpts {
                 system_prompt: Some(full_system),
                 max_tokens: Some(8192),
+                effort: current_effort,
                 ..Default::default()
             };
 

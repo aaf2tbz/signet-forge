@@ -78,6 +78,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             description: "Switch theme (signet-dark, signet-light, midnight, amber)",
             kind: CommandKind::Internal("theme"),
         },
+        SignetCommand {
+            key: "effort",
+            label: "/effort <level>",
+            description: "Set reasoning effort (low, medium, high)",
+            kind: CommandKind::Internal("effort"),
+        },
         // Status & Diagnostics
         SignetCommand {
             key: "status",
