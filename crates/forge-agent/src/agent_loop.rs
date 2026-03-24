@@ -54,6 +54,8 @@ pub struct AgentLoop {
     effort: Arc<Mutex<ReasoningEffort>>,
     /// CLI permission bypass (shared with TUI via Arc<Mutex>)
     bypass: Arc<Mutex<bool>>,
+    /// Signet daemon URL (for Signet native tools)
+    daemon_url: Option<String>,
 }
 
 impl AgentLoop {
@@ -67,9 +69,13 @@ impl AgentLoop {
         system_prompt: String,
         effort: Arc<Mutex<ReasoningEffort>>,
         bypass: Arc<Mutex<bool>>,
+        daemon_url: Option<String>,
     ) -> Self {
         let context_window = provider.context_window();
-        let tool_definitions = forge_tools::all_definitions();
+        let tool_definitions = match &daemon_url {
+            Some(url) => forge_tools::all_definitions_with_signet(url),
+            None => forge_tools::all_definitions(),
+        };
         Self {
             provider,
             hooks,
@@ -81,6 +87,7 @@ impl AgentLoop {
             tool_definitions,
             effort,
             bypass,
+            daemon_url,
         }
     }
 
@@ -300,7 +307,10 @@ impl AgentLoop {
             // 8. Execute tool calls with permission checks
             let mut tool_results_content = Vec::new();
             for tc in &tool_calls {
-                let tool_impl = forge_tools::find_tool(&tc.name);
+                let tool_impl = match &self.daemon_url {
+                    Some(url) => forge_tools::find_tool_with_signet(&tc.name, url),
+                    None => forge_tools::find_tool(&tc.name),
+                };
                 let permission_level = tool_impl
                     .as_ref()
                     .map(|t| t.permission())

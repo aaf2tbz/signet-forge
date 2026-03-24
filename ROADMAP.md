@@ -64,17 +64,14 @@ Six phases from scaffold to production. Each phase has a clear deliverable — s
 - [x] Skill loading from `~/.agents/skills/` — parse SKILL.md frontmatter, register as slash commands
 - [x] Command palette (Ctrl+K) — fuzzy search over built-in commands + skills
 - [x] CLI tool visibility — tool_use, tool_result, and code changes from CLI stream-json render as cards
-- [ ] Connect to Signet marketplace MCP servers
+- [x] Signet native tools — memory_search, memory_store, knowledge_expand, secret_exec via daemon HTTP (no MCP needed)
+- [x] Dashboard overlay panel (F2) — tabbed view: Memory, Pipeline, Embeddings, Health with live data
+- [x] WebSearch tool — DuckDuckGo HTML search, no API key
+- [x] WebFetch tool — fetch + strip HTML to text, 50K char limit
+- [ ] Connect to Signet marketplace MCP servers (route daemon proxy tools)
 - [ ] Connect to external MCP servers (configured in forge config)
-- [ ] Signet's built-in MCP tools available natively (memory_search, memory_store, secret_exec, etc.)
-- [ ] Dashboard overlay panels:
-  - Memory panel — recent memories, importance scores, search
-  - Pipeline status — queue depth, job states, health score
-  - Knowledge graph stats — entity count, relation count
-  - Embedding health — model status, dimension, pending count
 - [ ] SSE event stream consumer for real-time dashboard updates
 - [ ] Sub-agent tool (spawn restricted-tool research tasks)
-- [ ] WebSearch and WebFetch tools
 
 ---
 

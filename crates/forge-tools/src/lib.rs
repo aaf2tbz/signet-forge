@@ -3,6 +3,7 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod read;
+pub mod signet;
 pub mod webfetch;
 pub mod websearch;
 pub mod write;
@@ -45,7 +46,27 @@ pub fn all_tools() -> Vec<Box<dyn Tool>> {
     ]
 }
 
-/// Find a tool by name
+/// Get all tools including Signet daemon tools (when connected)
+pub fn all_tools_with_signet(daemon_url: &str) -> Vec<Box<dyn Tool>> {
+    let mut tools = all_tools();
+    tools.push(Box::new(signet::MemorySearchTool { daemon_url: daemon_url.to_string() }));
+    tools.push(Box::new(signet::MemoryStoreTool { daemon_url: daemon_url.to_string() }));
+    tools.push(Box::new(signet::KnowledgeExpandTool { daemon_url: daemon_url.to_string() }));
+    tools.push(Box::new(signet::SecretExecTool { daemon_url: daemon_url.to_string() }));
+    tools
+}
+
+/// Get all tool definitions including Signet tools
+pub fn all_definitions_with_signet(daemon_url: &str) -> Vec<ToolDefinition> {
+    all_tools_with_signet(daemon_url).iter().map(|t| t.definition()).collect()
+}
+
+/// Find a tool by name (including Signet tools)
 pub fn find_tool(name: &str) -> Option<Box<dyn Tool>> {
     all_tools().into_iter().find(|t| t.name() == name)
+}
+
+/// Find a tool by name with Signet tools
+pub fn find_tool_with_signet(name: &str, daemon_url: &str) -> Option<Box<dyn Tool>> {
+    all_tools_with_signet(daemon_url).into_iter().find(|t| t.name() == name)
 }

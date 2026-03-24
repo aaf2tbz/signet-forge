@@ -283,6 +283,7 @@ impl App {
         let effort = Arc::new(Mutex::new(forge_provider::ReasoningEffort::default()));
         let bypass = Arc::new(Mutex::new(false));
 
+        let daemon_url = signet_client.as_ref().map(|c| c.base_url().to_string());
         let agent = Arc::new(AgentLoop::new(
             provider,
             hooks,
@@ -292,6 +293,7 @@ impl App {
             system_prompt.clone(),
             Arc::clone(&effort),
             Arc::clone(&bypass),
+            daemon_url,
         ));
 
         // Start config watcher
@@ -1728,6 +1730,7 @@ impl App {
         let (event_tx, event_rx) = mpsc::channel::<AgentEvent>(256);
         let (permission_tx, permission_rx) = mpsc::channel::<PermissionRequest>(8);
 
+        let daemon_url = self.signet_client.as_ref().map(|c| c.base_url().to_string());
         self.agent = Arc::new(AgentLoop::new(
             new_provider,
             hooks,
@@ -1737,6 +1740,7 @@ impl App {
             self.system_prompt.clone(),
             Arc::clone(&self.effort),
             Arc::clone(&self.bypass),
+            daemon_url,
         ));
 
         self.event_rx = event_rx;
