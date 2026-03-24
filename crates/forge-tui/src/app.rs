@@ -339,20 +339,16 @@ impl App {
                 });
             }
 
-            // Check for config change events
+            // Drain config change events silently — just update internal state
             if let Some(rx) = &mut self.config_rx {
                 while let Ok(event) = rx.try_recv() {
                     match event {
                         ConfigEvent::Reloaded(config) => {
                             self.pipeline_info = config.pipeline_summary();
-                            self.entries.push(ChatEntry::Status(format!(
-                                "Config reloaded: {}",
-                                self.pipeline_info
-                            )));
+                            // Silent update — no chat spam
                         }
-                        ConfigEvent::Error(e) => {
-                            self.entries
-                                .push(ChatEntry::Error(format!("Config reload failed: {e}")));
+                        ConfigEvent::Error(_) => {
+                            // Ignore config errors silently
                         }
                     }
                 }
