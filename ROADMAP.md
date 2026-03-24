@@ -71,12 +71,12 @@ Switch between Claude, GPT-4o, Gemini mid-conversation with Ctrl+O. Close Forge,
 **Goal:** Feature parity with Claude Code for Signet users, plus dashboard integration no other tool has.
 
 ### What gets built
-- [ ] MCP client — stdio transport (subprocess JSON-RPC) and HTTP/SSE transport
+- [x] MCP client — stdio transport (subprocess JSON-RPC with initialize handshake)
 - [ ] Connect to Signet marketplace MCP servers
 - [ ] Connect to external MCP servers (configured in forge config)
 - [ ] Signet's built-in MCP tools available natively (memory_search, memory_store, secret_exec, etc.)
-- [ ] Skill loading from `~/.agents/skills/` — parse SKILL.md frontmatter, register as slash commands
-- [ ] Command palette (Ctrl+K) — fuzzy search over commands + skills
+- [x] Skill loading from `~/.agents/skills/` — parse SKILL.md frontmatter, register as slash commands
+- [x] Command palette (Ctrl+K) — fuzzy search over built-in commands + skills
 - [ ] Dashboard overlay panels (F2):
   - Memory panel — recent memories, importance scores, search
   - Pipeline status — queue depth, job states, health score

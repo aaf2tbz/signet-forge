@@ -1,5 +1,6 @@
 use crate::input::{key_to_action, Action};
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
+use crate::views::command_palette::{CommandKind, CommandPalette};
 use crate::views::model_picker::ModelPicker;
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -64,6 +65,10 @@ pub struct App {
     permission_dialog: Option<PermissionDialog>,
     /// Model picker overlay
     model_picker: Option<ModelPicker>,
+    /// Command palette overlay
+    command_palette: Option<CommandPalette>,
+    /// Loaded skills
+    skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
     signet_client: Option<SignetClient>,
     /// Shared permissions manager
@@ -169,6 +174,10 @@ impl App {
             .map(|c| c.pipeline_summary())
             .unwrap_or_else(|_| "unknown".to_string());
 
+        // Load skills from ~/.agents/skills/
+        let skills = forge_signet::skills::load_skills();
+        info!("Loaded {} skills", skills.len());
+
         Self {
             input: String::new(),
             cursor: 0,
@@ -187,6 +196,8 @@ impl App {
             permission_rx,
             permission_dialog: None,
             model_picker: None,
+            command_palette: None,
+            skills,
             signet_client,
             permissions,
             system_prompt,
@@ -339,6 +350,11 @@ impl App {
         if let Some(picker) = &self.model_picker {
             picker.draw(frame);
         }
+
+        // Command palette overlay
+        if let Some(palette) = &self.command_palette {
+            palette.draw(frame);
+        }
     }
 
     fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
@@ -411,6 +427,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If command palette is open, handle palette keys
+        if self.command_palette.is_some() {
+            self.handle_command_palette_key(key).await;
+            return;
+        }
+
         // If model picker is open, handle picker keys
         if self.model_picker.is_some() {
             self.handle_model_picker_key(key).await;
@@ -484,12 +506,100 @@ impl App {
             Action::ModelPicker if !self.processing => {
                 self.model_picker = Some(ModelPicker::new());
             }
+            Action::CommandPalette if !self.processing => {
+                self.command_palette = Some(CommandPalette::new(&self.skills));
+            }
             Action::ClearScreen => {
                 self.entries.clear();
                 self.streaming_text.clear();
                 self.scroll_offset = 0;
             }
             _ => {}
+        }
+    }
+
+    async fn handle_command_palette_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Esc => {
+                self.command_palette = None;
+            }
+            KeyCode::Up => {
+                if let Some(palette) = &mut self.command_palette {
+                    palette.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(palette) = &mut self.command_palette {
+                    palette.move_down();
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(palette) = &mut self.command_palette {
+                    palette.backspace();
+                }
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                if let Some(palette) = &mut self.command_palette {
+                    palette.type_char(c);
+                }
+            }
+            KeyCode::Enter => {
+                let selection = self
+                    .command_palette
+                    .as_ref()
+                    .and_then(|p| p.selected_command().cloned());
+                self.command_palette = None;
+
+                if let Some(cmd) = selection {
+                    self.execute_command(&cmd).await;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn execute_command(&mut self, cmd: &crate::views::command_palette::CommandEntry) {
+        match &cmd.kind {
+            CommandKind::BuiltIn(action) => match action.as_str() {
+                "model_picker" => {
+                    self.model_picker = Some(ModelPicker::new());
+                }
+                "clear" => {
+                    self.entries.clear();
+                    self.streaming_text.clear();
+                    self.scroll_offset = 0;
+                }
+                "quit" => {
+                    self.should_quit = true;
+                }
+                "remember" => {
+                    self.entries.push(ChatEntry::Status(
+                        "Type /remember <content> in the input to save a memory.".to_string(),
+                    ));
+                }
+                "recall" => {
+                    self.entries.push(ChatEntry::Status(
+                        "Type /recall <query> in the input to search memories.".to_string(),
+                    ));
+                }
+                _ => {}
+            },
+            CommandKind::Skill(_content) => {
+                // Inject skill content as a system message for the next prompt
+                self.entries.push(ChatEntry::Status(format!(
+                    "Skill /{} activated — type your prompt.",
+                    cmd.name
+                )));
+                // Prepend skill content to input for next submission
+                self.input = format!("[Skill: {}] ", cmd.name);
+                self.cursor = self.input.len();
+            }
         }
     }
 
