@@ -51,25 +51,39 @@ impl ProcessingPhase {
     /// Spinner frames — Signet-themed geometric sequence
     const FRAMES: &[&str] = &["◇", "◈", "◆", "◈"];
 
-    /// Contextual verbs that cycle based on tick for each phase
+    /// Contextual verbs that cycle based on tick for each phase.
+    /// tick/80 ≈ 4 seconds per verb at 50ms frame rate.
     fn label(&self, tick: usize) -> &'static str {
         match self {
             Self::Idle | Self::Streaming => "",
             Self::RecallingMemories => {
-                const VERBS: &[&str] = &["Remembering", "Recalling", "Searching", "Warming"];
-                VERBS[(tick / 40) % VERBS.len()]
+                const VERBS: &[&str] = &[
+                    "Remembering", "Recalling", "Ruminating",
+                    "Investigating", "Exploring", "Traveling",
+                ];
+                VERBS[(tick / 80) % VERBS.len()]
             }
             Self::Thinking => {
-                const VERBS: &[&str] = &["Thinking", "Realizing", "Maturing", "Evolving"];
-                VERBS[(tick / 40) % VERBS.len()]
+                const VERBS: &[&str] = &[
+                    "Thinking", "Deliberating", "Hypothesizing",
+                    "Riddling", "Constructing", "Squandering",
+                    "Galloping", "Fiddling",
+                ];
+                VERBS[(tick / 80) % VERBS.len()]
             }
             Self::Planning => {
-                const VERBS: &[&str] = &["Planning", "Mapping", "Cycling", "Reasoning"];
-                VERBS[(tick / 40) % VERBS.len()]
+                const VERBS: &[&str] = &[
+                    "Planning", "Tinkering", "Exploring",
+                    "Investigating", "Deliberating", "Constructing",
+                ];
+                VERBS[(tick / 80) % VERBS.len()]
             }
             Self::Writing => {
-                const VERBS: &[&str] = &["Writing", "Composing", "Crafting", "Building"];
-                VERBS[(tick / 40) % VERBS.len()]
+                const VERBS: &[&str] = &[
+                    "Writing", "Composing", "Crafting",
+                    "Tinkering", "Building", "Fiddling",
+                ];
+                VERBS[(tick / 80) % VERBS.len()]
             }
             Self::ExecutingTool(_) => "Running",
         }
