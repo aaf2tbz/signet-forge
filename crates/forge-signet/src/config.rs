@@ -3,7 +3,21 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use tracing::{debug, info};
 
-/// Signet agent.yaml configuration (subset relevant to Forge)
+/// Signet agent.yaml configuration (subset relevant to Forge).
+///
+/// The agent.yaml controls FOUR separate model configurations:
+///
+/// 1. **Conversational model** — Forge's provider (NOT in agent.yaml, controlled by Forge CLI/picker)
+/// 2. **Synthesis model** — memory.pipelineV2.synthesis.{provider,model} — used by the daemon's
+///    summary worker to extract facts from transcripts after session-end
+/// 3. **Extraction model** — memory.pipelineV2.extraction.{provider,model} — used by the daemon's
+///    extraction worker for deeper fact/entity analysis (typically qwen3:4b via Ollama)
+/// 4. **Embedding model** — embedding.{provider,model} — used to compute vector embeddings for
+///    memory search (typically nomic-embed-text via Ollama or native WASM)
+///
+/// Forge NEVER directly calls models 2-4. The daemon handles all of that.
+/// Forge only sends hook data (transcripts, prompts) and the daemon processes them
+/// using its own configured models.
 #[derive(Debug, Deserialize, Default)]
 pub struct AgentConfig {
     #[serde(default)]
@@ -12,6 +26,11 @@ pub struct AgentConfig {
     pub memory: Option<MemoryConfig>,
     #[serde(default)]
     pub embedding: Option<EmbeddingConfig>,
+    // Flat keys written by dashboard (take precedence over nested)
+    #[serde(default, rename = "extractionProvider")]
+    pub extraction_provider_flat: Option<String>,
+    #[serde(default, rename = "extractionModel")]
+    pub extraction_model_flat: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -22,14 +41,107 @@ pub struct MemoryConfig {
     pub session_budget: Option<usize>,
     #[serde(default)]
     pub decay_rate: Option<f64>,
+    #[serde(default, rename = "pipelineV2")]
+    pub pipeline_v2: Option<PipelineV2Config>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct PipelineV2Config {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub extraction: Option<ExtractionConfig>,
+    #[serde(default)]
+    pub synthesis: Option<SynthesisConfig>,
+}
+
+/// Extraction model config — the daemon uses this, NOT the conversational model
+#[derive(Debug, Deserialize, Default)]
+pub struct ExtractionConfig {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub strength: Option<String>,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+}
+
+/// Synthesis model config — the daemon uses this for summary generation
+#[derive(Debug, Deserialize, Default)]
+pub struct SynthesisConfig {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Embedding model config — daemon uses for vector search
 #[derive(Debug, Deserialize, Default)]
 pub struct EmbeddingConfig {
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub dimensions: Option<usize>,
+}
+
+impl AgentConfig {
+    /// Get the effective extraction provider (flat key takes precedence)
+    pub fn extraction_provider(&self) -> Option<&str> {
+        self.extraction_provider_flat
+            .as_deref()
+            .or_else(|| {
+                self.memory
+                    .as_ref()?
+                    .pipeline_v2
+                    .as_ref()?
+                    .extraction
+                    .as_ref()?
+                    .provider
+                    .as_deref()
+            })
+    }
+
+    /// Get the effective extraction model (flat key takes precedence)
+    pub fn extraction_model(&self) -> Option<&str> {
+        self.extraction_model_flat
+            .as_deref()
+            .or_else(|| {
+                self.memory
+                    .as_ref()?
+                    .pipeline_v2
+                    .as_ref()?
+                    .extraction
+                    .as_ref()?
+                    .model
+                    .as_deref()
+            })
+    }
+
+    /// Get the embedding provider
+    pub fn embedding_provider(&self) -> Option<&str> {
+        self.embedding.as_ref()?.provider.as_deref()
+    }
+
+    /// Get the embedding model
+    pub fn embedding_model(&self) -> Option<&str> {
+        self.embedding.as_ref()?.model.as_deref()
+    }
+
+    /// Summary of the extraction/embedding config for display
+    pub fn pipeline_summary(&self) -> String {
+        let ext_provider = self.extraction_provider().unwrap_or("ollama");
+        let ext_model = self.extraction_model().unwrap_or("qwen3:4b");
+        let emb_provider = self.embedding_provider().unwrap_or("native");
+        let emb_model = self.embedding_model().unwrap_or("nomic-embed-text");
+
+        format!(
+            "extraction: {ext_model} ({ext_provider}) | embedding: {emb_model} ({emb_provider})"
+        )
+    }
 }
 
 /// Load agent.yaml from the standard Signet location
@@ -38,7 +150,10 @@ pub fn load_agent_config() -> Result<AgentConfig, ForgeError> {
     debug!("Loading agent config from {}", path.display());
 
     if !path.exists() {
-        info!("No agent.yaml found at {} — using defaults", path.display());
+        info!(
+            "No agent.yaml found at {} — using defaults",
+            path.display()
+        );
         return Ok(AgentConfig::default());
     }
 
@@ -49,6 +164,10 @@ pub fn load_agent_config() -> Result<AgentConfig, ForgeError> {
         .map_err(|e| ForgeError::config(format!("Failed to parse agent.yaml: {e}")))?;
 
     debug!("Loaded agent config: name={:?}", config.name);
+    debug!(
+        "Pipeline config: {}",
+        config.pipeline_summary()
+    );
     Ok(config)
 }
 

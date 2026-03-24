@@ -1,6 +1,6 @@
 use forge_core::ForgeError;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tracing::{debug, warn};
 
 /// HTTP client for the Signet daemon API
@@ -25,19 +25,6 @@ pub struct DaemonStatus {
     pub sessions: Vec<serde_json::Value>,
     #[serde(default)]
     pub pipeline: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct HookPayload {
-    pub harness: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transcript: Option<String>,
 }
 
 impl SignetClient {
@@ -87,33 +74,6 @@ impl SignetClient {
         resp.json::<DaemonStatus>()
             .await
             .map_err(|e| ForgeError::daemon(format!("Invalid status response: {e}")))
-    }
-
-    /// Call a hook endpoint on the daemon
-    pub async fn call_hook(
-        &self,
-        hook: &str,
-        payload: &HookPayload,
-    ) -> Result<serde_json::Value, ForgeError> {
-        let resp = self
-            .client
-            .post(format!("{}/api/hooks/{}", self.base_url, hook))
-            .json(payload)
-            .send()
-            .await
-            .map_err(|e| ForgeError::daemon(format!("Hook {hook} failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ForgeError::daemon(format!(
-                "Hook {hook} returned {status}: {body}"
-            )));
-        }
-
-        resp.json()
-            .await
-            .map_err(|e| ForgeError::daemon(format!("Invalid hook response: {e}")))
     }
 
     /// Generic GET request to daemon API
