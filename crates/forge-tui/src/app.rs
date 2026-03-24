@@ -20,7 +20,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
     DefaultTerminal, Frame,
 };
 use std::sync::Arc;
@@ -576,11 +576,20 @@ impl App {
                 " Type a message...",
                 Style::default().fg(self.theme.muted),
             ))
+            .wrap(Wrap { trim: false })
         } else {
             Paragraph::new(Span::styled(format!(" > {}", &self.input), input_style))
+                .wrap(Wrap { trim: false })
         };
 
-        let input_widget = input_text.block(input_block);
+        // Scroll input to keep cursor visible when text exceeds max height
+        let visible_content = input_height.saturating_sub(2); // minus border + padding
+        let cursor_offset = self.cursor as u16 + 3; // " > " prefix
+        let iw = chunks[2].width.saturating_sub(1).max(1);
+        let cursor_line = cursor_offset / iw;
+        let input_scroll = cursor_line.saturating_sub(visible_content.saturating_sub(1));
+
+        let input_widget = input_text.scroll((input_scroll, 0)).block(input_block);
         frame.render_widget(input_widget, chunks[2]);
 
         // Slash command autocomplete dropdown
@@ -588,13 +597,10 @@ impl App {
             signet_commands::render_autocomplete(&self.input, chunks[2], frame.buffer_mut(), &self.theme);
         }
 
-        // Position cursor — always visible so users can type ahead during processing
+        // Position cursor — always visible, accounts for input scroll
         if self.permission_dialog.is_none() {
-            // Cursor wraps within the input box
-            let cursor_offset = self.cursor as u16 + 3; // " > " prefix
-            let iw = chunks[2].width.saturating_sub(1).max(1);
             let cx = chunks[2].x + (cursor_offset % iw);
-            let cy = chunks[2].y + 1 + (cursor_offset / iw);
+            let cy = chunks[2].y + 1 + cursor_line - input_scroll;
             frame.set_cursor_position((cx, cy));
         }
 
