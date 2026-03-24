@@ -41,6 +41,8 @@ enum ProcessingPhase {
     Idle,
     RecallingMemories,
     Thinking,
+    Planning,
+    Writing,
     Streaming,
     ExecutingTool(String),
 }
@@ -49,21 +51,41 @@ impl ProcessingPhase {
     /// Spinner frames — Signet-themed geometric sequence
     const FRAMES: &[&str] = &["◇", "◈", "◆", "◈"];
 
+    /// Contextual verbs that cycle based on tick for each phase
+    fn label(&self, tick: usize) -> &'static str {
+        match self {
+            Self::Idle | Self::Streaming => "",
+            Self::RecallingMemories => {
+                const VERBS: &[&str] = &["Remembering", "Recalling", "Searching", "Warming"];
+                VERBS[(tick / 40) % VERBS.len()]
+            }
+            Self::Thinking => {
+                const VERBS: &[&str] = &["Thinking", "Realizing", "Maturing", "Evolving"];
+                VERBS[(tick / 40) % VERBS.len()]
+            }
+            Self::Planning => {
+                const VERBS: &[&str] = &["Planning", "Mapping", "Cycling", "Reasoning"];
+                VERBS[(tick / 40) % VERBS.len()]
+            }
+            Self::Writing => {
+                const VERBS: &[&str] = &["Writing", "Composing", "Crafting", "Building"];
+                VERBS[(tick / 40) % VERBS.len()]
+            }
+            Self::ExecutingTool(_) => "Running",
+        }
+    }
+
     fn render(&self, tick: usize) -> String {
         let frame = Self::FRAMES[tick % Self::FRAMES.len()];
         match self {
             Self::Idle | Self::Streaming => String::new(),
-            Self::RecallingMemories => {
-                let dots = ".".repeat((tick / 4) % 4);
-                format!("  {frame} Recalling memories{dots}")
-            }
-            Self::Thinking => {
-                let dots = ".".repeat((tick / 4) % 4);
-                format!("  {frame} Thinking{dots}")
-            }
             Self::ExecutingTool(name) => {
                 let dots = ".".repeat((tick / 4) % 4);
-                format!("  {frame} Running {name}{dots}")
+                format!("  {frame} {} {name}{dots}", self.label(tick))
+            }
+            _ => {
+                let dots = ".".repeat((tick / 4) % 4);
+                format!("  {frame} {}{dots}", self.label(tick))
             }
         }
     }
@@ -1587,7 +1609,15 @@ impl App {
                 self.scroll_offset = 0;
             }
             AgentEvent::ToolStart { name, .. } => {
-                self.processing_phase = ProcessingPhase::ExecutingTool(name.clone());
+                // Map tool names to contextual phases
+                let lower = name.to_lowercase();
+                self.processing_phase = if lower.contains("write") || lower.contains("edit") || lower.contains("create") {
+                    ProcessingPhase::Writing
+                } else if lower.contains("read") || lower.contains("search") || lower.contains("grep") || lower.contains("glob") {
+                    ProcessingPhase::Planning
+                } else {
+                    ProcessingPhase::ExecutingTool(name.clone())
+                };
                 if !self.streaming_text.is_empty() {
                     self.entries
                         .push(ChatEntry::AssistantText(self.streaming_text.clone()));
@@ -1643,15 +1673,18 @@ impl App {
             }
             AgentEvent::Status(msg) => {
                 // Update processing phase based on status message
-                if msg.contains("Recalling") {
+                let lower = msg.to_lowercase();
+                if lower.contains("recalling") || lower.contains("searching") || lower.contains("memory") {
                     self.processing_phase = ProcessingPhase::RecallingMemories;
-                } else if msg.contains("Thinking") {
+                } else if lower.contains("thinking") || lower.contains("reasoning") {
                     self.processing_phase = ProcessingPhase::Thinking;
-                } else if msg.contains("Compacting") {
+                } else if lower.contains("planning") || lower.contains("analyzing") {
+                    self.processing_phase = ProcessingPhase::Planning;
+                } else if lower.contains("writing") || lower.contains("editing") || lower.contains("generating") {
+                    self.processing_phase = ProcessingPhase::Writing;
+                } else if lower.contains("compacting") {
                     self.processing_phase = ProcessingPhase::ExecutingTool("compaction".to_string());
                 }
-                // Don't push static status entries for animated phases
-                // — they're rendered as the activity line instead
             }
             AgentEvent::ToolApproval(_, name, _) => {
                 self.entries.push(ChatEntry::Status(format!(

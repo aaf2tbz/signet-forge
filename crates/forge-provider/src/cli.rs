@@ -314,12 +314,52 @@ impl Provider for CliProvider {
                                     }
                                 }
                             }
-                            "content_block_delta" => {
-                                if let Some(delta) = parsed.get("delta") {
-                                    if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
-                                        send!(StreamEvent::TextDelta(text.to_string()));
+                            "content_block_start" => {
+                                // Detect block type for phase updates
+                                if let Some(block) = parsed.get("content_block") {
+                                    let btype = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                    match btype {
+                                        "tool_use" => {
+                                            let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                                            let id = block.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                                            send!(StreamEvent::ToolUseStart {
+                                                id: id.to_string(),
+                                                name: name.to_string(),
+                                            });
+                                        }
+                                        "thinking" => {
+                                            // Model is in extended thinking mode
+                                        }
+                                        _ => {}
                                     }
                                 }
+                            }
+                            "content_block_delta" => {
+                                if let Some(delta) = parsed.get("delta") {
+                                    let dtype = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                    match dtype {
+                                        "text_delta" => {
+                                            if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                                                send!(StreamEvent::TextDelta(text.to_string()));
+                                            }
+                                        }
+                                        "input_json_delta" => {
+                                            if let Some(json) = delta.get("partial_json").and_then(|v| v.as_str()) {
+                                                send!(StreamEvent::ToolUseInput(json.to_string()));
+                                            }
+                                        }
+                                        _ => {
+                                            // thinking_delta, etc — just show we're working
+                                            if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                                                send!(StreamEvent::TextDelta(text.to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            "content_block_stop" => {
+                                // Could be end of tool_use block
+                                send!(StreamEvent::ToolUseEnd);
                             }
                             "result" => {
                                 if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
