@@ -795,33 +795,8 @@ impl App {
             Action::DashboardNav if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
             }
-            Action::Dashboard => {
-                // Open Signet dashboard in default browser
-                let url = self
-                    .signet_client
-                    .as_ref()
-                    .map(|c| c.base_url().to_string())
-                    .unwrap_or_else(|| "http://localhost:3850".to_string());
-
-                // Use std::process (not tokio) to avoid async issues in sync context
-                let result = std::process::Command::new("open")
-                    .arg(&url)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-
-                match result {
-                    Ok(s) if s.success() => {
-                        self.entries.push(ChatEntry::Status(format!(
-                            "Dashboard opened: {url}"
-                        )));
-                    }
-                    _ => {
-                        self.entries.push(ChatEntry::Error(format!(
-                            "Failed to open dashboard. Visit: {url}"
-                        )));
-                    }
-                }
+            Action::Dashboard if !self.processing => {
+                self.dashboard_nav = Some(DashboardNav::new());
             }
             _ => {}
         }
@@ -1040,18 +1015,7 @@ impl App {
                             }
                         }
                         "dashboard" => {
-                            let url = self
-                                .signet_client
-                                .as_ref()
-                                .map(|c| c.base_url().to_string())
-                                .unwrap_or_else(|| "http://localhost:3850".to_string());
-                            let _ = std::process::Command::new("open")
-                                .arg(&url)
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .status();
-                            self.entries
-                                .push(ChatEntry::Status(format!("Dashboard: {url}")));
+                            self.dashboard_nav = Some(DashboardNav::new());
                         }
                         "resume" => {
                             self.resume_last_session().await;
