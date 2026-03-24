@@ -1,3 +1,4 @@
+use crate::widgets::markdown::render_markdown;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -88,11 +89,12 @@ impl<'a> Widget for ChatView<'a> {
                 }
                 ChatEntry::AssistantText(text) => {
                     lines.push(Line::from(""));
-                    for line in text.lines() {
-                        lines.push(Line::from(Span::styled(
-                            format!("  {line}"),
-                            Style::default().fg(Color::White),
-                        )));
+                    let md_lines = render_markdown(text);
+                    for md_line in md_lines {
+                        // Indent markdown lines
+                        let mut indented_spans = vec![Span::raw("  ")];
+                        indented_spans.extend(md_line.spans);
+                        lines.push(Line::from(indented_spans));
                     }
                 }
                 ChatEntry::ToolCall { name, status } => {
@@ -167,11 +169,11 @@ impl<'a> Widget for ChatView<'a> {
         // Streaming text (currently being generated)
         if !self.streaming_text.is_empty() {
             lines.push(Line::from(""));
-            for line in self.streaming_text.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    Style::default().fg(Color::White),
-                )));
+            let md_lines = render_markdown(self.streaming_text);
+            for md_line in md_lines {
+                let mut indented_spans = vec![Span::raw("  ")];
+                indented_spans.extend(md_line.spans);
+                lines.push(Line::from(indented_spans));
             }
             // Cursor indicator
             lines.push(Line::from(Span::styled(

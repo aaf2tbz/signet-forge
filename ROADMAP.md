@@ -30,18 +30,18 @@ Five phases from scaffold to production. Each phase has a clear deliverable — 
 **Goal:** Full agentic coding loop with tool execution and Signet memory injection on every prompt.
 
 ### What gets built
-- [ ] Wire tool execution into the agentic loop (tool_use parsing → execute → result → loop back to LLM)
-- [ ] Permission system — auto-approve read-only tools, dialog for write tools, always-confirm for dangerous ops
-- [ ] Permission approval dialog in TUI (Allow / Deny / Always Allow)
-- [ ] Session lifecycle hooks firing at the right moments:
+- [x] Wire tool execution into the agentic loop (tool_use parsing → execute → result → loop back to LLM)
+- [x] Permission system — auto-approve read-only tools, dialog for write tools, always-confirm for dangerous ops
+- [x] Permission approval dialog in TUI (Allow / Deny / Always Allow)
+- [x] Session lifecycle hooks firing at the right moments:
   - Session start → inject memories into system prompt
   - Each prompt → inject per-prompt memories
   - Pre-compaction → get summary instructions from daemon
   - Session end → submit transcript for extraction
-- [ ] Context window management — track token usage, trigger auto-compact at 90% capacity
-- [ ] Markdown rendering in chat output (pulldown-cmark)
-- [ ] Syntax-highlighted code blocks (syntect)
-- [ ] Tool output rendering (collapsible, truncated for long outputs)
+- [x] Context window management — track token usage, trigger auto-compact at 90% capacity
+- [x] Markdown rendering in chat output (pulldown-cmark)
+- [ ] Syntax-highlighted code blocks (syntect) — code blocks render with borders, lang-aware highlighting is Phase 5
+- [x] Tool output rendering (collapsible, truncated for long outputs)
 
 ### Deliverable
 Ask Forge to read a file, edit code, run a test — it executes tools, loops back to the LLM with results, and Signet memories are injected on every prompt. Session transcripts are submitted for extraction when the session ends.

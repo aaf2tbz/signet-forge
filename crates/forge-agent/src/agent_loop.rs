@@ -1,3 +1,4 @@
+use crate::context::ContextManager;
 use crate::permissions::{PermissionManager, PermissionRequest, PermissionResponse};
 use crate::session::SharedSession;
 use forge_core::{Message, MessageContent, TokenUsage, ToolCall};
@@ -7,7 +8,7 @@ use forge_tools;
 use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Events sent from the agent loop to the TUI
 #[derive(Debug, Clone)]
@@ -43,6 +44,7 @@ pub struct AgentLoop {
     /// Channel for sending permission requests to the TUI
     permission_tx: mpsc::Sender<PermissionRequest>,
     permissions: Arc<Mutex<PermissionManager>>,
+    context_manager: ContextManager,
     system_prompt: String,
 }
 
@@ -55,12 +57,14 @@ impl AgentLoop {
         permissions: Arc<Mutex<PermissionManager>>,
         system_prompt: String,
     ) -> Self {
+        let context_window = provider.context_window();
         Self {
             provider,
             hooks,
             event_tx,
             permission_tx,
             permissions,
+            context_manager: ContextManager::new(context_window),
             system_prompt,
         }
     }
@@ -203,8 +207,26 @@ impl AgentLoop {
                 s.add_message(assistant_msg);
             }
 
-            // 7. If no tool calls, we're done
+            // 7. If no tool calls, we're done — check compaction first
             if tool_calls.is_empty() {
+                // Check if context needs compaction
+                let estimated_tokens = {
+                    let s = session.lock().await;
+                    ContextManager::estimate_tokens(&s.messages)
+                };
+                if self.context_manager.should_compact(estimated_tokens) {
+                    let _ = self
+                        .event_tx
+                        .send(AgentEvent::Status("Compacting context...".to_string()))
+                        .await;
+                    if let Err(e) = self
+                        .context_manager
+                        .compact(session, &self.provider, self.hooks.as_ref())
+                        .await
+                    {
+                        warn!("Context compaction failed: {e}");
+                    }
+                }
                 let _ = self.event_tx.send(AgentEvent::TurnComplete).await;
                 return;
             }
