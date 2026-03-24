@@ -4,4 +4,5 @@ pub mod permissions;
 pub mod session;
 
 pub use agent_loop::{AgentEvent, AgentLoop};
-pub use session::Session;
+pub use permissions::{PermissionManager, PermissionRequest, PermissionResponse};
+pub use session::{Session, SharedSession};

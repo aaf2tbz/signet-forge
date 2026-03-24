@@ -1,6 +1,11 @@
 use chrono::{DateTime, Utc};
 use forge_core::Message;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
+
+/// Shared session handle — both the agent loop and TUI hold a reference
+pub type SharedSession = Arc<Mutex<Session>>;
 
 /// Represents a conversation session
 #[derive(Debug)]
@@ -27,6 +32,10 @@ impl Session {
             total_input_tokens: 0,
             total_output_tokens: 0,
         }
+    }
+
+    pub fn shared(model: &str, provider: &str, project: Option<String>) -> SharedSession {
+        Arc::new(Mutex::new(Self::new(model, provider, project)))
     }
 
     pub fn add_message(&mut self, message: Message) {

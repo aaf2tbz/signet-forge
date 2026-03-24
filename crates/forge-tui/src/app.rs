@@ -2,20 +2,31 @@ use crate::input::{key_to_action, Action};
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
-use forge_agent::{AgentEvent, AgentLoop, Session};
+use forge_agent::{
+    AgentEvent, AgentLoop, PermissionManager, PermissionRequest, PermissionResponse, Session,
+    SharedSession,
+};
 use forge_provider::Provider;
 use forge_signet::hooks::SessionHooks;
 use forge_signet::SignetClient;
 use ratatui::{
     layout::{Constraint, Layout},
-    style::{Color, Style},
-    text::Span,
-    widgets::{Block, Borders, Paragraph, Widget},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Widget},
     DefaultTerminal, Frame,
 };
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::info;
+
+/// Permission dialog state
+struct PermissionDialog {
+    tool_name: String,
+    tool_input: serde_json::Value,
+    response_tx: tokio::sync::oneshot::Sender<PermissionResponse>,
+    selected: usize, // 0=Allow, 1=Always Allow, 2=Deny
+}
 
 /// Application state
 pub struct App {
@@ -29,8 +40,8 @@ pub struct App {
     streaming_text: String,
     /// Chat scroll offset
     scroll_offset: u16,
-    /// Session
-    session: Session,
+    /// Shared session
+    session: SharedSession,
     /// Provider info
     model: String,
     provider_name: String,
@@ -45,8 +56,10 @@ pub struct App {
     should_quit: bool,
     /// Agent event receiver
     event_rx: mpsc::Receiver<AgentEvent>,
-    /// Agent event sender (for spawning agent tasks)
-    event_tx: mpsc::Sender<AgentEvent>,
+    /// Permission request receiver
+    permission_rx: mpsc::Receiver<PermissionRequest>,
+    /// Active permission dialog
+    permission_dialog: Option<PermissionDialog>,
     /// The agent loop
     agent: Arc<AgentLoop>,
 }
@@ -65,13 +78,15 @@ impl App {
             .ok()
             .map(|p| p.display().to_string());
 
-        let session = Session::new(&model, &provider_name, cwd.clone());
+        let session = Session::shared(&model, &provider_name, cwd.clone());
+        let session_id = session.lock().await.id.clone();
 
         let (event_tx, event_rx) = mpsc::channel::<AgentEvent>(256);
+        let (permission_tx, permission_rx) = mpsc::channel::<PermissionRequest>(8);
 
         // Set up session hooks if daemon is available
         let hooks = signet_client.as_ref().map(|client| {
-            SessionHooks::new(client.clone(), session.id.clone(), cwd)
+            SessionHooks::new(client.clone(), session_id, cwd.clone())
         });
 
         let daemon_healthy = if let Some(client) = &signet_client {
@@ -80,10 +95,33 @@ impl App {
             false
         };
 
+        // Call session-start hook to get initial context
+        let mut memories_injected = 0;
+        if let Some(hooks) = &hooks {
+            match hooks.session_start().await {
+                Ok(context) if !context.is_empty() => {
+                    info!("Session start hook returned {} bytes", context.len());
+                    memories_injected = context.matches("memory").count().max(1);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    info!("Session start hook failed (non-fatal): {e}");
+                }
+            }
+        }
+
+        let permissions = Arc::new(Mutex::new(PermissionManager::new(vec![
+            "Read".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+        ])));
+
         let agent = Arc::new(AgentLoop::new(
             provider,
             hooks,
-            event_tx.clone(),
+            event_tx,
+            permission_tx,
+            permissions,
             system_prompt,
         ));
 
@@ -97,19 +135,23 @@ impl App {
             model,
             provider_name,
             context_window,
-            memories_injected: 0,
+            memories_injected,
             daemon_healthy,
             processing: false,
             should_quit: false,
             event_rx,
-            event_tx,
+            permission_rx,
+            permission_dialog: None,
             agent,
         }
     }
 
     /// Run the TUI event loop
     pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
-        info!("Forge TUI starting — model: {}, provider: {}", self.model, self.provider_name);
+        info!(
+            "Forge TUI starting — model: {}, provider: {}",
+            self.model, self.provider_name
+        );
 
         loop {
             // Draw
@@ -127,6 +169,16 @@ impl App {
             // Drain agent events
             while let Ok(event) = self.event_rx.try_recv() {
                 self.handle_agent_event(event);
+            }
+
+            // Check for permission requests
+            while let Ok(request) = self.permission_rx.try_recv() {
+                self.permission_dialog = Some(PermissionDialog {
+                    tool_name: request.tool_name,
+                    tool_input: request.tool_input,
+                    response_tx: request.response_tx,
+                    selected: 0,
+                });
             }
 
             if self.should_quit {
@@ -148,12 +200,19 @@ impl App {
         ])
         .split(area);
 
+        // Read session state for display
+        let (input_tokens, output_tokens) = if let Ok(s) = self.session.try_lock() {
+            (s.total_input_tokens, s.total_output_tokens)
+        } else {
+            (0, 0)
+        };
+
         // Status bar
         let status = StatusBar {
             model: &self.model,
             provider: &self.provider_name,
-            input_tokens: self.session.total_input_tokens,
-            output_tokens: self.session.total_output_tokens,
+            input_tokens,
+            output_tokens,
             context_window: self.context_window,
             memories_injected: self.memories_injected,
             daemon_healthy: self.daemon_healthy,
@@ -185,25 +244,99 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ))
         } else {
-            Paragraph::new(Span::styled(
-                format!(" > {}", &self.input),
-                input_style,
-            ))
+            Paragraph::new(Span::styled(format!(" > {}", &self.input), input_style))
         };
 
         let input_widget = input_text.block(input_block);
         frame.render_widget(input_widget, chunks[2]);
 
         // Position cursor
-        if !self.processing {
-            frame.set_cursor_position((
-                chunks[2].x + 3 + self.cursor as u16,
-                chunks[2].y + 1,
-            ));
+        if !self.processing && self.permission_dialog.is_none() {
+            frame.set_cursor_position((chunks[2].x + 3 + self.cursor as u16, chunks[2].y + 1));
+        }
+
+        // Permission dialog overlay
+        if let Some(dialog) = &self.permission_dialog {
+            self.draw_permission_dialog(frame, dialog);
         }
     }
 
+    fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
+        let area = frame.area();
+
+        // Center the dialog
+        let dialog_width = 60u16.min(area.width.saturating_sub(4));
+        let dialog_height = 10u16.min(area.height.saturating_sub(4));
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+        let dialog_area = ratatui::layout::Rect::new(x, y, dialog_width, dialog_height);
+
+        // Clear the area behind the dialog
+        frame.render_widget(Clear, dialog_area);
+
+        // Build dialog content
+        let input_preview = serde_json::to_string_pretty(&dialog.tool_input)
+            .unwrap_or_else(|_| format!("{:?}", dialog.tool_input));
+        let preview_lines: Vec<&str> = input_preview.lines().take(3).collect();
+
+        let options = ["[Y] Allow", "[A] Always Allow", "[N] Deny"];
+
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Tool: ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    &dialog.tool_name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+        ];
+
+        for pl in &preview_lines {
+            lines.push(Line::from(Span::styled(
+                format!("  {pl}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        lines.push(Line::from(""));
+
+        let mut option_spans = vec![Span::raw("  ")];
+        for (i, opt) in options.iter().enumerate() {
+            let style = if i == dialog.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            option_spans.push(Span::styled(*opt, style));
+            if i < options.len() - 1 {
+                option_spans.push(Span::raw("  "));
+            }
+        }
+        lines.push(Line::from(option_spans));
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" Allow tool execution? ");
+
+        let paragraph = Paragraph::new(lines).block(block);
+        frame.render_widget(paragraph, dialog_area);
+    }
+
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If permission dialog is open, handle dialog keys
+        if self.permission_dialog.is_some() {
+            self.handle_permission_key(key).await;
+            return;
+        }
+
         let action = key_to_action(key);
 
         match action {
@@ -215,17 +348,12 @@ impl App {
 
                 self.entries.push(ChatEntry::UserMessage(input.clone()));
 
-                // Spawn agent task
+                // Spawn agent task with shared session
                 let agent = Arc::clone(&self.agent);
-                let mut session = Session::new(&self.model, &self.provider_name, self.session.project.clone());
-                // Transfer existing messages
-                session.messages = self.session.messages.clone();
-                session.total_input_tokens = self.session.total_input_tokens;
-                session.total_output_tokens = self.session.total_output_tokens;
+                let session = Arc::clone(&self.session);
 
-                // Spawn agent task
                 tokio::spawn(async move {
-                    agent.process_message(&mut session, &input).await;
+                    agent.process_message(&session, &input).await;
                 });
             }
             Action::InsertChar(c) if !self.processing => {
@@ -259,9 +387,9 @@ impl App {
             }
             Action::Cancel => {
                 if self.processing {
-                    // TODO: cancel current generation
                     self.processing = false;
                     self.streaming_text.clear();
+                    self.entries.push(ChatEntry::Status("Cancelled.".to_string()));
                 }
             }
             Action::Quit => {
@@ -276,15 +404,62 @@ impl App {
         }
     }
 
+    async fn handle_permission_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        let response = match key.code {
+            // Y or Enter on Allow
+            KeyCode::Char('y') | KeyCode::Char('Y') => Some(PermissionResponse::Allow),
+            // A for Always Allow
+            KeyCode::Char('a') | KeyCode::Char('A') => Some(PermissionResponse::AlwaysAllow),
+            // N or Escape for Deny
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                Some(PermissionResponse::Deny)
+            }
+            // Enter confirms current selection
+            KeyCode::Enter => {
+                if let Some(dialog) = &self.permission_dialog {
+                    Some(match dialog.selected {
+                        0 => PermissionResponse::Allow,
+                        1 => PermissionResponse::AlwaysAllow,
+                        _ => PermissionResponse::Deny,
+                    })
+                } else {
+                    None
+                }
+            }
+            // Arrow keys to navigate options
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+                if let Some(dialog) = &mut self.permission_dialog {
+                    match key.code {
+                        KeyCode::Left => {
+                            dialog.selected = dialog.selected.saturating_sub(1);
+                        }
+                        KeyCode::Right | KeyCode::Tab => {
+                            dialog.selected = (dialog.selected + 1).min(2);
+                        }
+                        _ => {}
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+
+        if let Some(response) = response {
+            if let Some(dialog) = self.permission_dialog.take() {
+                let _ = dialog.response_tx.send(response);
+            }
+        }
+    }
+
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::TextDelta(text) => {
                 self.streaming_text.push_str(&text);
-                // Auto-scroll to bottom
                 self.scroll_offset = 0;
             }
             AgentEvent::ToolStart { name, .. } => {
-                // Flush streaming text if any
                 if !self.streaming_text.is_empty() {
                     self.entries
                         .push(ChatEntry::AssistantText(self.streaming_text.clone()));
@@ -301,7 +476,7 @@ impl App {
                 is_error,
                 ..
             } => {
-                // Update the tool call status
+                // Update tool call status
                 if let Some(entry) = self.entries.iter_mut().rev().find(|e| {
                     matches!(e, ChatEntry::ToolCall { name: n, status: ToolStatus::Running } if *n == name)
                 }) {
@@ -320,9 +495,8 @@ impl App {
                     is_error,
                 });
             }
-            AgentEvent::Usage(usage) => {
-                self.session.total_input_tokens += usage.input_tokens;
-                self.session.total_output_tokens += usage.output_tokens;
+            AgentEvent::Usage(_) => {
+                // Token counts are updated in the shared session directly
             }
             AgentEvent::TurnComplete => {
                 if !self.streaming_text.is_empty() {
@@ -340,8 +514,10 @@ impl App {
             AgentEvent::Status(msg) => {
                 self.entries.push(ChatEntry::Status(msg));
             }
-            AgentEvent::ToolApproval { .. } => {
-                // TODO: Phase 2 — show approval dialog
+            AgentEvent::ToolApproval(_, name, _) => {
+                self.entries.push(ChatEntry::Status(format!(
+                    "Waiting for approval: {name}..."
+                )));
             }
         }
     }

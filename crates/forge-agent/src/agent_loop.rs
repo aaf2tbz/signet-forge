@@ -1,11 +1,12 @@
-use crate::session::Session;
+use crate::permissions::{PermissionManager, PermissionRequest, PermissionResponse};
+use crate::session::SharedSession;
 use forge_core::{Message, MessageContent, TokenUsage, ToolCall};
 use forge_provider::{CompletionOpts, Provider, StreamEvent};
 use forge_signet::hooks::SessionHooks;
 use forge_tools;
 use futures::StreamExt;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info};
 
 /// Events sent from the agent loop to the TUI
@@ -22,12 +23,8 @@ pub enum AgentEvent {
         output: String,
         is_error: bool,
     },
-    /// Tool needs permission approval
-    ToolApproval {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
+    /// Tool needs permission approval — TUI must respond via PermissionRequest channel
+    ToolApproval(String, String, serde_json::Value),
     /// Token usage update
     Usage(TokenUsage),
     /// Agent turn complete
@@ -43,6 +40,9 @@ pub struct AgentLoop {
     provider: Arc<dyn Provider>,
     hooks: Option<SessionHooks>,
     event_tx: mpsc::Sender<AgentEvent>,
+    /// Channel for sending permission requests to the TUI
+    permission_tx: mpsc::Sender<PermissionRequest>,
+    permissions: Arc<Mutex<PermissionManager>>,
     system_prompt: String,
 }
 
@@ -51,18 +51,22 @@ impl AgentLoop {
         provider: Arc<dyn Provider>,
         hooks: Option<SessionHooks>,
         event_tx: mpsc::Sender<AgentEvent>,
+        permission_tx: mpsc::Sender<PermissionRequest>,
+        permissions: Arc<Mutex<PermissionManager>>,
         system_prompt: String,
     ) -> Self {
         Self {
             provider,
             hooks,
             event_tx,
+            permission_tx,
+            permissions,
             system_prompt,
         }
     }
 
     /// Process a user message through the full agentic loop
-    pub async fn process_message(&self, session: &mut Session, user_input: &str) {
+    pub async fn process_message(&self, session: &SharedSession, user_input: &str) {
         // 1. Call user-prompt-submit hook for memory injection
         let mut memory_context = String::new();
         if let Some(hooks) = &self.hooks {
@@ -79,7 +83,10 @@ impl AgentLoop {
         }
 
         // 2. Add user message to session
-        session.add_message(Message::user(user_input));
+        {
+            let mut s = session.lock().await;
+            s.add_message(Message::user(user_input));
+        }
 
         // 3. Run the agentic loop
         loop {
@@ -98,12 +105,14 @@ impl AgentLoop {
 
             let tools = forge_tools::all_definitions();
 
+            // Get current messages snapshot
+            let messages = {
+                let s = session.lock().await;
+                s.messages.clone()
+            };
+
             // 4. Call the provider
-            let stream = match self
-                .provider
-                .complete(&session.messages, &tools, &opts)
-                .await
-            {
+            let stream = match self.provider.complete(&messages, &tools, &opts).await {
                 Ok(s) => s,
                 Err(e) => {
                     error!("Provider error: {e}");
@@ -152,8 +161,11 @@ impl AgentLoop {
                         });
                     }
                     StreamEvent::Usage(usage) => {
-                        session.total_input_tokens += usage.input_tokens;
-                        session.total_output_tokens += usage.output_tokens;
+                        {
+                            let mut s = session.lock().await;
+                            s.total_input_tokens += usage.input_tokens;
+                            s.total_output_tokens += usage.output_tokens;
+                        }
                         let _ = self.event_tx.send(AgentEvent::Usage(usage)).await;
                     }
                     StreamEvent::Done => break,
@@ -186,7 +198,10 @@ impl AgentLoop {
                 model: Some(self.provider.model().to_string()),
                 usage: None,
             };
-            session.add_message(assistant_msg);
+            {
+                let mut s = session.lock().await;
+                s.add_message(assistant_msg);
+            }
 
             // 7. If no tool calls, we're done
             if tool_calls.is_empty() {
@@ -194,18 +209,89 @@ impl AgentLoop {
                 return;
             }
 
-            // 8. Execute tool calls and add results
+            // 8. Execute tool calls with permission checks
             let mut tool_results_content = Vec::new();
             for tc in &tool_calls {
+                // Check permissions
+                let tool_impl = forge_tools::find_tool(&tc.name);
+                let permission_level = tool_impl
+                    .as_ref()
+                    .map(|t| t.permission())
+                    .unwrap_or(forge_core::ToolPermission::Write);
+
+                let approved = {
+                    let perms = self.permissions.lock().await;
+                    perms.is_auto_approved(&tc.name, permission_level)
+                };
+
+                if !approved {
+                    // Request permission from the TUI
+                    let _ = self
+                        .event_tx
+                        .send(AgentEvent::ToolApproval(
+                            tc.id.clone(),
+                            tc.name.clone(),
+                            tc.input.clone(),
+                        ))
+                        .await;
+
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let _ = self
+                        .permission_tx
+                        .send(PermissionRequest {
+                            tool_name: tc.name.clone(),
+                            tool_input: tc.input.clone(),
+                            response_tx,
+                        })
+                        .await;
+
+                    // Wait for user response
+                    let response = match response_rx.await {
+                        Ok(r) => r,
+                        Err(_) => {
+                            // Channel closed — treat as deny
+                            PermissionResponse::Deny
+                        }
+                    };
+
+                    match response {
+                        PermissionResponse::Allow => {
+                            // Proceed with execution
+                        }
+                        PermissionResponse::AlwaysAllow => {
+                            let mut perms = self.permissions.lock().await;
+                            perms.approve_for_session(&tc.name);
+                        }
+                        PermissionResponse::Deny => {
+                            let result = forge_core::ToolResult::error(
+                                &tc.id,
+                                "Permission denied by user",
+                            );
+                            let _ = self
+                                .event_tx
+                                .send(AgentEvent::ToolResult {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    output: result.content.clone(),
+                                    is_error: true,
+                                })
+                                .await;
+                            tool_results_content.push(MessageContent::ToolResult {
+                                tool_use_id: result.tool_use_id,
+                                content: result.content,
+                                is_error: result.is_error,
+                            });
+                            continue;
+                        }
+                    }
+                }
+
                 info!("Executing tool: {} (id: {})", tc.name, tc.id);
 
-                let result = if let Some(tool) = forge_tools::find_tool(&tc.name) {
+                let result = if let Some(tool) = tool_impl {
                     tool.execute(tc).await
                 } else {
-                    forge_core::ToolResult::error(
-                        &tc.id,
-                        format!("Unknown tool: {}", tc.name),
-                    )
+                    forge_core::ToolResult::error(&tc.id, format!("Unknown tool: {}", tc.name))
                 };
 
                 let _ = self
@@ -233,10 +319,12 @@ impl AgentLoop {
                 model: None,
                 usage: None,
             };
-            session.add_message(tool_result_msg);
+            {
+                let mut s = session.lock().await;
+                s.add_message(tool_result_msg);
+            }
 
             // Loop back for the next LLM call with tool results
-            // Clear memory context for subsequent iterations
             memory_context.clear();
         }
     }
