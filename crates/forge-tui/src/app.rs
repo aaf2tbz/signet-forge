@@ -495,11 +495,21 @@ impl App {
         let bg_block = Block::default().style(Style::default().bg(self.theme.bg));
         frame.render_widget(bg_block, area);
 
-        // Layout: [status_bar(2)] [chat(flex)] [input(3)]
+        // Layout: [status_bar(2)] [chat(flex)] [input(dynamic)]
+        // Input expands based on content lines, capped at 1/3 of terminal height
+        let input_width = area.width.saturating_sub(5) as usize; // account for " > " prefix + border
+        let input_lines = if input_width == 0 || self.input.is_empty() {
+            1
+        } else {
+            let chars: usize = self.input.chars().count();
+            1u16.max(((chars + input_width - 1) / input_width) as u16)
+        };
+        let max_input = (area.height / 3).max(3);
+        let input_height = (input_lines + 2).min(max_input); // +2 for border + padding
         let chunks = Layout::vertical([
-            Constraint::Length(2),  // status bar
-            Constraint::Min(5),    // chat area
-            Constraint::Length(3), // input area
+            Constraint::Length(2),            // status bar
+            Constraint::Min(5),              // chat area
+            Constraint::Length(input_height), // input area
         ])
         .split(area);
 
@@ -580,7 +590,12 @@ impl App {
 
         // Position cursor — always visible so users can type ahead during processing
         if self.permission_dialog.is_none() {
-            frame.set_cursor_position((chunks[2].x + 3 + self.cursor as u16, chunks[2].y + 1));
+            // Cursor wraps within the input box
+            let cursor_offset = self.cursor as u16 + 3; // " > " prefix
+            let iw = chunks[2].width.saturating_sub(1).max(1);
+            let cx = chunks[2].x + (cursor_offset % iw);
+            let cy = chunks[2].y + 1 + (cursor_offset / iw);
+            frame.set_cursor_position((cx, cy));
         }
 
         // Permission dialog overlay
