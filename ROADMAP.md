@@ -56,10 +56,10 @@ Ask Forge to read a file, edit code, run a test — it executes tools, loops bac
 - [x] Model picker UI (Ctrl+O) — dropdown overlay with filter, arrow navigation, Enter to select
 - [ ] Connect to daemon's `GET /api/pipeline/model-registry` for dynamic model discovery
 - [ ] Extraction model sync — changing the primary model optionally updates the extraction model in agent.yaml
-- [ ] Config file watching with `notify` crate — real-time response to agent.yaml changes
+- [x] Config file watching with `notify` crate — real-time response to agent.yaml changes
 - [ ] Bidirectional config — change settings from terminal UI, writes back to agent.yaml
-- [ ] Session persistence in local SQLite — save/restore conversation history
-- [ ] Session resume (`forge --resume`)
+- [x] Session persistence in local SQLite — auto-save on quit, load on resume
+- [x] Session resume (`forge --resume`) — restores last session's message history
 - [ ] Session browser (Ctrl+H) — list past sessions, preview, resume
 
 ### Deliverable

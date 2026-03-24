@@ -39,6 +39,40 @@ Signet currently operates as a **passenger** inside other AI tools. It hooks int
 
 **Connector maintenance drops to zero.** No more `connector-claude-code`, `connector-opencode`, `connector-codex`, `connector-openclaw`. Each connector is a maintenance burden that breaks when the upstream tool changes its API. Forge eliminates all of them. Signet's memory, identity, and skills become the platform; LLM providers become interchangeable backends.
 
+### Model Architecture: Four Models, One System
+
+Signet operates with four separate model configurations. Understanding this is critical:
+
+| Model | Who Controls It | Where Configured | Default |
+|---|---|---|---|
+| **Conversational** | Forge (model picker / CLI) | `forge --model` or Ctrl+O | claude-sonnet-4-6 |
+| **Synthesis** | Daemon summary worker | `agent.yaml` → `pipelineV2.synthesis` | claude-code/haiku |
+| **Extraction** | Daemon extraction worker | `agent.yaml` → `pipelineV2.extraction` | qwen3:4b (Ollama) |
+| **Embedding** | Daemon vector search | `agent.yaml` → `embedding` | nomic-embed-text (Ollama) |
+
+**Switching the conversational model in Forge does NOT affect extraction or embedding.** The daemon manages its own models independently. Extraction and embedding typically run on local Ollama models (qwen3:4b and nomic-embed-text) for zero-cost, low-latency processing. The conversational model can be any cloud provider.
+
+When Forge calls the session-end hook, it sends the raw transcript. The daemon then:
+1. Queues a summary job → uses the **synthesis model** to extract facts
+2. Processes extraction jobs → uses the **extraction model** for deeper analysis
+3. Computes embeddings → uses the **embedding model** for vector search indexing
+
+All three steps happen asynchronously after Forge sends the transcript. Forge never calls these models directly.
+
+### Supported Providers
+
+| Provider | Models | API |
+|---|---|---|
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | Messages API |
+| **OpenAI** | GPT-4o, GPT-4o Mini, o4-mini | Chat Completions |
+| **Google** | Gemini 2.5 Flash, Gemini 2.5 Pro | GenerateContent |
+| **Groq** | Llama 3.3 70B | OpenAI-compatible |
+| **Ollama** | Any local model | OpenAI-compatible |
+| **OpenRouter** | Any routed model | OpenAI-compatible |
+| **xAI** | Grok models | OpenAI-compatible |
+
+Switch between any provider mid-session with Ctrl+O. API keys resolve automatically from Signet's secret store.
+
 ## Architecture
 
 ```

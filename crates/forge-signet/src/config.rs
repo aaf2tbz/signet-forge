@@ -18,7 +18,7 @@ use tracing::{debug, info};
 /// Forge NEVER directly calls models 2-4. The daemon handles all of that.
 /// Forge only sends hook data (transcripts, prompts) and the daemon processes them
 /// using its own configured models.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct AgentConfig {
     #[serde(default)]
     pub name: Option<String>,
@@ -33,7 +33,7 @@ pub struct AgentConfig {
     pub extraction_model_flat: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct MemoryConfig {
     #[serde(default)]
     pub database: Option<String>,
@@ -45,7 +45,7 @@ pub struct MemoryConfig {
     pub pipeline_v2: Option<PipelineV2Config>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct PipelineV2Config {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -56,7 +56,7 @@ pub struct PipelineV2Config {
 }
 
 /// Extraction model config — the daemon uses this, NOT the conversational model
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct ExtractionConfig {
     #[serde(default)]
     pub provider: Option<String>,
@@ -69,7 +69,7 @@ pub struct ExtractionConfig {
 }
 
 /// Synthesis model config — the daemon uses this for summary generation
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct SynthesisConfig {
     #[serde(default)]
     pub provider: Option<String>,
@@ -78,7 +78,7 @@ pub struct SynthesisConfig {
 }
 
 /// Embedding model config — daemon uses for vector search
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct EmbeddingConfig {
     #[serde(default)]
     pub provider: Option<String>,

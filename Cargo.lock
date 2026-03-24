@@ -615,6 +615,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "dirs",
  "forge-core",
  "forge-mcp",
  "forge-provider",

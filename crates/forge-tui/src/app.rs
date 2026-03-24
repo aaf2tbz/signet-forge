@@ -5,12 +5,12 @@ use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
 use forge_agent::{
     AgentEvent, AgentLoop, PermissionManager, PermissionRequest, PermissionResponse, Session,
-    SharedSession,
+    SessionStore, SharedSession,
 };
 use forge_provider::{self, Provider};
 use forge_signet::hooks::SessionHooks;
 use forge_signet::secrets::resolve_api_key;
-use forge_signet::SignetClient;
+use forge_signet::{ConfigEvent, ConfigWatcher, SignetClient};
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
@@ -72,6 +72,12 @@ pub struct App {
     system_prompt: String,
     /// The agent loop
     agent: Arc<AgentLoop>,
+    /// Config watcher event receiver
+    config_rx: Option<mpsc::Receiver<ConfigEvent>>,
+    /// Session persistence store
+    session_store: Option<SessionStore>,
+    /// Pipeline summary (extraction + embedding models)
+    pipeline_info: String,
 }
 
 impl App {
@@ -135,6 +141,34 @@ impl App {
             system_prompt.clone(),
         ));
 
+        // Start config watcher
+        let config_rx = match ConfigWatcher::start() {
+            Ok((_watcher, rx)) => {
+                // Keep watcher alive by leaking it (it runs in a background thread)
+                // The watcher is dropped when the app exits
+                std::mem::forget(_watcher);
+                Some(rx)
+            }
+            Err(e) => {
+                info!("Config watcher unavailable: {e}");
+                None
+            }
+        };
+
+        // Open session store
+        let session_store = match SessionStore::open() {
+            Ok(store) => Some(store),
+            Err(e) => {
+                info!("Session persistence unavailable: {e}");
+                None
+            }
+        };
+
+        // Load pipeline info from agent config
+        let pipeline_info = forge_signet::config::load_agent_config()
+            .map(|c| c.pipeline_summary())
+            .unwrap_or_else(|_| "unknown".to_string());
+
         Self {
             input: String::new(),
             cursor: 0,
@@ -157,6 +191,9 @@ impl App {
             permissions,
             system_prompt,
             agent,
+            config_rx,
+            session_store,
+            pipeline_info,
         }
     }
 
@@ -195,10 +232,34 @@ impl App {
                 });
             }
 
+            // Check for config change events
+            if let Some(rx) = &mut self.config_rx {
+                while let Ok(event) = rx.try_recv() {
+                    match event {
+                        ConfigEvent::Reloaded(config) => {
+                            self.pipeline_info = config.pipeline_summary();
+                            self.entries.push(ChatEntry::Status(format!(
+                                "Config reloaded: {}",
+                                self.pipeline_info
+                            )));
+                        }
+                        ConfigEvent::Error(e) => {
+                            self.entries
+                                .push(ChatEntry::Error(format!("Config reload failed: {e}")));
+                        }
+                    }
+                }
+            }
+
             if self.should_quit {
+                // Auto-save session before quitting
+                self.save_session().await;
                 break;
             }
         }
+
+        // Submit transcript for extraction
+        self.submit_transcript().await;
 
         Ok(())
     }
@@ -664,6 +725,96 @@ impl App {
                 self.entries.push(ChatEntry::Status(format!(
                     "Waiting for approval: {name}..."
                 )));
+            }
+        }
+    }
+
+    /// Save current session to SQLite for later resume
+    async fn save_session(&self) {
+        let store = match &self.session_store {
+            Some(s) => s,
+            None => return,
+        };
+
+        let s = self.session.lock().await;
+        if s.messages.is_empty() {
+            return;
+        }
+
+        if let Err(e) = store.save_session(
+            &s.id,
+            &s.model,
+            &s.provider,
+            s.project.as_deref(),
+            &s.started_at.to_rfc3339(),
+            &s.messages,
+            s.total_input_tokens,
+            s.total_output_tokens,
+        ) {
+            info!("Failed to save session: {e}");
+        } else {
+            info!("Session {} saved ({} messages)", s.id, s.messages.len());
+        }
+    }
+
+    /// Submit transcript to Signet daemon for extraction on quit
+    async fn submit_transcript(&self) {
+        let s = self.session.lock().await;
+        if s.messages.is_empty() {
+            return;
+        }
+
+        let transcript = s.transcript();
+        let session_id = s.id.clone();
+        let project = s.project.clone();
+        drop(s); // Release lock before async call
+
+        if let Some(client) = &self.signet_client {
+            let hooks = SessionHooks::new(client.clone(), session_id, project);
+            if let Err(e) = hooks.session_end(&transcript).await {
+                info!("Session-end hook failed (non-fatal): {e}");
+            }
+        }
+    }
+
+    /// Load a previous session from SQLite (for --resume)
+    pub async fn resume_last_session(&mut self) -> bool {
+        let store = match &self.session_store {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let session_id = match store.last_session_id() {
+            Some(id) => id,
+            None => {
+                self.entries
+                    .push(ChatEntry::Status("No previous session found.".to_string()));
+                return false;
+            }
+        };
+
+        match store.load_messages(&session_id) {
+            Ok(messages) if !messages.is_empty() => {
+                let mut s = self.session.lock().await;
+                s.messages = messages;
+                let count = s.messages.len();
+                drop(s);
+
+                // Replay messages into chat entries
+                self.entries
+                    .push(ChatEntry::Status(format!("Resumed session {session_id} ({count} messages)")));
+
+                true
+            }
+            Ok(_) => {
+                self.entries
+                    .push(ChatEntry::Status("Previous session was empty.".to_string()));
+                false
+            }
+            Err(e) => {
+                self.entries
+                    .push(ChatEntry::Error(format!("Failed to resume: {e}")));
+                false
             }
         }
     }

@@ -119,6 +119,11 @@ async fn main() -> Result<()> {
     let mut terminal = ratatui::init();
     let mut app = App::new(provider, signet_client, system_prompt).await;
 
+    // Resume last session if requested
+    if cli.resume {
+        app.resume_last_session().await;
+    }
+
     // Run the app
     let result = app.run(&mut terminal).await;
 
