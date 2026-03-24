@@ -45,6 +45,8 @@ pub enum Action {
     Paste,
     /// Tab-complete slash command
     TabComplete,
+    /// Open keybind editor
+    Keybinds,
     /// No action
     None,
 }
@@ -81,6 +83,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => Action::ClearScreen,
         (KeyModifiers::CONTROL, KeyCode::Char('g')) => Action::SignetCommands,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => Action::Dashboard,
+        (KeyModifiers::CONTROL, KeyCode::Char('b')) => Action::Keybinds,
 
         // Character input
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => Action::InsertChar(c),

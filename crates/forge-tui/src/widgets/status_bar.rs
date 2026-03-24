@@ -102,6 +102,7 @@ impl<'a> Widget for StatusBar<'a> {
                 ("signet_commands", "Signet"),
                 ("cancel", "Cancel"),
                 ("quit", "Quit"),
+                ("keybinds", "Keybinds"),
             ];
 
             let mut spans = vec![Span::styled(" ", border)];

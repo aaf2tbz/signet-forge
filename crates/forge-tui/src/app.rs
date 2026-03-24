@@ -797,6 +797,7 @@ impl App {
                 "signet_commands" => Action::SignetCommands,
                 "dashboard" => Action::Dashboard,
                 "dashboard_nav" => Action::DashboardNav,
+                "keybinds" => Action::Keybinds,
                 "clear_screen" => Action::ClearScreen,
                 "scroll_up" => Action::ScrollUp,
                 "scroll_down" => Action::ScrollDown,
@@ -918,6 +919,9 @@ impl App {
             }
             Action::DashboardNav if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
+            }
+            Action::Keybinds if !self.processing => {
+                self.keybind_editor = Some(KeybindEditor::new());
             }
             Action::Dashboard if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
