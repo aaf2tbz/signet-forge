@@ -2,7 +2,6 @@ use crate::{CompletionOpts, CompletionStream, Provider, StreamEvent};
 use async_trait::async_trait;
 use forge_core::{ForgeError, Message, MessageContent, Role, ToolDefinition, TokenUsage};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::BufRead;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, warn};
 
@@ -202,9 +201,11 @@ impl Provider for CliProvider {
         let mut cmd = CommandBuilder::new(&self.cli_path);
         cmd.args(&args);
         cmd.env("SIGNET_NO_HOOKS", "1");
-        // Suppress color/cursor escape sequences from CLIs
-        cmd.env("NO_COLOR", "1");
-        cmd.env("TERM", "dumb");
+        // Full terminal env — lets CLIs output colors, spinners, and prompts
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("FORCE_COLOR", "1");
+        cmd.env("LANG", "en_US.UTF-8");
 
         let mut child = pair
             .slave
@@ -222,10 +223,13 @@ impl Provider for CliProvider {
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
         let cli_kind = self.cli_kind;
 
-        // Read PTY output on a blocking thread (portable-pty uses synchronous I/O)
+        // Read PTY output on a blocking thread with large buffer (64KB like WindowedClaude)
+        // to handle burst output from agent/bash tool runs without backpressure.
         tokio::task::spawn_blocking(move || {
-            let buf = std::io::BufReader::new(reader);
-            let lines_iter = buf.lines();
+            use std::io::Read;
+            let mut raw = reader;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut leftover = String::new();
 
             // Macro to send events from the blocking thread
             macro_rules! send {
@@ -234,14 +238,52 @@ impl Provider for CliProvider {
                 };
             }
 
-            for line_result in lines_iter {
-                let line = match line_result {
-                    Ok(l) => l,
+            // Strip ANSI escape sequences for JSON parsing
+            fn strip_ansi(s: &str) -> String {
+                let mut out = String::with_capacity(s.len());
+                let mut chars = s.chars();
+                while let Some(c) = chars.next() {
+                    if c == '\x1b' {
+                        // Skip ESC [ ... (letter) sequences
+                        if let Some(next) = chars.next() {
+                            if next == '[' {
+                                for inner in chars.by_ref() {
+                                    if inner.is_ascii_alphabetic() || inner == 'm' || inner == 'K' || inner == 'H' || inner == 'J' {
+                                        break;
+                                    }
+                                }
+                            }
+                            // Also skip ESC ] ... BEL/ST (OSC sequences)
+                        }
+                    } else if c == '\r' {
+                        // Skip carriage returns from PTY
+                        continue;
+                    } else {
+                        out.push(c);
+                    }
+                }
+                out
+            }
+
+            // Read in large chunks, split into lines, process each
+            'outer: loop {
+                let n = match raw.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(_) => break,
                 };
-                if line.trim().is_empty() {
-                    continue;
-                }
+
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                leftover.push_str(&chunk);
+
+                while let Some(nl) = leftover.find('\n') {
+                    let line = strip_ansi(leftover[..nl].trim());
+                    leftover.drain(..nl + 1);
+
+                    if line.is_empty() {
+                        continue;
+                    }
 
                 match cli_kind {
                     CliKind::Claude => {
@@ -285,7 +327,7 @@ impl Provider for CliProvider {
                                         let _ = tx.blocking_send(StreamEvent::TextDelta(result.to_string()));
                                     }
                                 }
-                                break;
+                                break 'outer;
                             }
                             _ => {}
                         }
@@ -324,7 +366,7 @@ impl Provider for CliProvider {
                                         ..Default::default()
                                     }));
                                 }
-                                break;
+                                break 'outer;
                             }
                             _ => {}
                         }
@@ -333,7 +375,8 @@ impl Provider for CliProvider {
                         send!(StreamEvent::TextDelta(format!("{line}\n")));
                     }
                 }
-            }
+                } // end while let Some(nl) — line splitting
+            } // end 'outer loop — chunk reading
 
             // Wait for the process to finish
             match child.wait() {
