@@ -46,11 +46,8 @@ impl CliProvider {
                     args.push("--model".to_string());
                     args.push(self.model.clone());
                 }
-                // Pass reasoning effort to Claude CLI
-                if effort != crate::ReasoningEffort::Medium {
-                    args.push("--reasoning-effort".to_string());
-                    args.push(effort.as_str().to_string());
-                }
+                // Claude CLI doesn't support --reasoning-effort flag;
+                // effort is handled at the API level, not the CLI level
                 args
             }
             CliKind::Codex => {

@@ -95,6 +95,8 @@ pub struct App {
     attached_images: Vec<String>,
     /// CLI binary path (if using a CLI provider)
     cli_path: Option<String>,
+    /// All detected CLI tools (for model picker)
+    detected_clis: Vec<(forge_provider::cli::CliKind, String)>,
     /// Current reasoning effort level (shared with agent loop)
     effort: Arc<Mutex<forge_provider::ReasoningEffort>>,
     /// Memories recalled for current prompt
@@ -297,6 +299,7 @@ impl App {
             keybinds: KeyBindConfig::load(),
             attached_images: Vec::new(),
             cli_path,
+            detected_clis: Vec::new(),
             effort,
             memories_injected,
             total_memories,
@@ -338,6 +341,9 @@ impl App {
 
         // Enable bracketed paste so we can detect drag-and-drop file paths
         let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste);
+
+        // Detect installed CLI tools so model picker always shows them
+        self.detected_clis = forge_provider::cli::detect_cli_tools().await;
 
         loop {
             // Increment animation tick
@@ -790,6 +796,14 @@ impl App {
             Action::CursorRight if self.cursor < self.input_char_len() => {
                 self.cursor += 1;
             }
+            Action::TabComplete => {
+                if self.input.starts_with('/') {
+                    if let Some(completed) = signet_commands::tab_complete(&self.input) {
+                        self.input = completed;
+                        self.cursor = self.input_char_len();
+                    }
+                }
+            }
             Action::Home => {
                 self.cursor = 0;
             }
@@ -823,15 +837,7 @@ impl App {
                 self.should_quit = true;
             }
             Action::ModelPicker if !self.processing => {
-                // If currently on a CLI provider, show CLI models first
-                if self.provider_name.ends_with("-cli") {
-                    // Find the CLI path from the current provider
-                    let cli_path = self.cli_path.clone().unwrap_or_default();
-                    self.model_picker =
-                        Some(ModelPicker::with_cli(&self.provider_name, &cli_path));
-                } else {
-                    self.model_picker = Some(ModelPicker::new());
-                }
+                self.model_picker = Some(ModelPicker::with_detected_clis(&self.detected_clis));
             }
             Action::CommandPalette if !self.processing => {
                 self.command_palette = Some(CommandPalette::new(&self.skills));
@@ -1107,12 +1113,7 @@ impl App {
                             self.scroll_offset = 0;
                         }
                         "model" => {
-                            if self.provider_name.ends_with("-cli") {
-                                let path = self.cli_path.clone().unwrap_or_default();
-                                self.model_picker = Some(ModelPicker::with_cli(&self.provider_name, &path));
-                            } else {
-                                self.model_picker = Some(ModelPicker::new());
-                            }
+                            self.model_picker = Some(ModelPicker::with_detected_clis(&self.detected_clis));
                         }
                         "dashboard" => {
                             self.dashboard_nav = Some(DashboardNav::new());

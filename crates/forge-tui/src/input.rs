@@ -43,6 +43,8 @@ pub enum Action {
     NewLine,
     /// Paste from clipboard
     Paste,
+    /// Tab-complete slash command
+    TabComplete,
     /// No action
     None,
 }
@@ -65,6 +67,9 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::NONE, KeyCode::End) => Action::End,
         (KeyModifiers::NONE, KeyCode::Backspace) => Action::Backspace,
         (KeyModifiers::NONE, KeyCode::Delete) => Action::Delete,
+
+        // Tab completion
+        (KeyModifiers::NONE, KeyCode::Tab) => Action::TabComplete,
 
         // Scroll
         (KeyModifiers::NONE, KeyCode::PageUp) => Action::ScrollUp,

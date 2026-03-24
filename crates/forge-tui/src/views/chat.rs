@@ -207,7 +207,7 @@ impl<'a> Widget for ChatView<'a> {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     activity.clone(),
-                    Style::default().fg(t.accent),
+                    Style::default().fg(t.spinner),
                 )));
             }
         }

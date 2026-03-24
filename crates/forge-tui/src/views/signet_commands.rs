@@ -636,3 +636,62 @@ fn render_model_suggestions(prefix: &str, area: Rect, buf: &mut Buffer, theme: &
         }
     }
 }
+
+/// Return the best tab-completion for the current input.
+/// Returns the completed string (with leading `/`) or None if no match.
+pub fn tab_complete(input: &str) -> Option<String> {
+    let query = input.trim_start_matches('/');
+    if query.is_empty() {
+        return None;
+    }
+
+    // Argument completion for known commands
+    if let Some((cmd, arg_prefix)) = query.split_once(' ') {
+        let arg_lower = arg_prefix.to_lowercase();
+        let suggestions: &[ArgSuggestion] = match cmd {
+            "effort" => EFFORT_ARGS,
+            "theme" => THEME_ARGS,
+            _ => return None,
+        };
+        let matched: Vec<&ArgSuggestion> = suggestions
+            .iter()
+            .filter(|a| !arg_lower.is_empty() && a.value.starts_with(arg_lower.as_str()))
+            .collect();
+        if matched.len() == 1 {
+            return Some(format!("/{cmd} {}", matched[0].value));
+        }
+        return None;
+    }
+
+    // Command name completion
+    let query_lower = query.to_lowercase();
+    let matches: Vec<SignetCommand> = all_commands()
+        .into_iter()
+        .filter(|c| c.key.starts_with(&query_lower))
+        .collect();
+
+    if matches.len() == 1 {
+        Some(format!("/{}", matches[0].key))
+    } else if matches.len() > 1 {
+        // Find longest common prefix among matches
+        let first = matches[0].key;
+        let prefix_len = first
+            .char_indices()
+            .take_while(|(i, c)| {
+                matches.iter().all(|m| {
+                    m.key.get(*i..*i + c.len_utf8()) == Some(&first[*i..*i + c.len_utf8()])
+                })
+            })
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        let common = &first[..prefix_len];
+        if common.len() > query_lower.len() {
+            Some(format!("/{common}"))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}

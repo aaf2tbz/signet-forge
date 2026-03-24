@@ -42,6 +42,8 @@ pub struct Theme {
     pub selected_bg: Color,
     /// Selected item foreground
     pub selected_fg: Color,
+    /// Spinner/loading animation color
+    pub spinner: Color,
 }
 
 impl Theme {
@@ -86,6 +88,8 @@ impl Theme {
             // Selected — accent-hover on accent bg
             selected_bg: Color::Rgb(138, 138, 150),
             selected_fg: Color::Rgb(8, 8, 10),
+            // Neon yellow-green — Signet homepage loading animation
+            spinner: Color::Rgb(180, 255, 80),
         }
     }
 
@@ -130,6 +134,8 @@ impl Theme {
             // Selected
             selected_bg: Color::Rgb(106, 102, 96),
             selected_fg: Color::Rgb(228, 223, 216),
+            // Neon yellow-green — toned for light bg
+            spinner: Color::Rgb(80, 160, 40),
         }
     }
 
@@ -156,6 +162,7 @@ impl Theme {
             dialog_bg: Color::Rgb(20, 25, 45),
             selected_bg: Color::Rgb(100, 150, 255),
             selected_fg: Color::Rgb(10, 12, 22),
+            spinner: Color::Rgb(80, 255, 120),
         }
     }
 
@@ -182,6 +189,7 @@ impl Theme {
             dialog_bg: Color::Rgb(25, 20, 10),
             selected_bg: Color::Rgb(255, 180, 50),
             selected_fg: Color::Rgb(15, 12, 5),
+            spinner: Color::Rgb(255, 220, 50),
         }
     }
 

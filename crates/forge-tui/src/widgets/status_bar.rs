@@ -89,19 +89,34 @@ impl<'a> Widget for StatusBar<'a> {
 
         // Bottom line: key bindings — all text uses theme colors
         if area.height >= 2 {
+            let border = Style::default().fg(self.muted);
+            let key = Style::default().fg(self.accent);
+            let label = Style::default().fg(self.status_fg);
             let keys_line = Line::from(vec![
-                Span::styled(" ^O", Style::default().fg(self.accent)),
-                Span::styled(" model ", Style::default().fg(self.status_fg)),
-                Span::styled("^K", Style::default().fg(self.accent)),
-                Span::styled(" cmd ", Style::default().fg(self.status_fg)),
-                Span::styled("^D", Style::default().fg(self.accent)),
-                Span::styled(" dashboard ", Style::default().fg(self.status_fg)),
-                Span::styled("^G", Style::default().fg(self.accent)),
-                Span::styled(" signet ", Style::default().fg(self.status_fg)),
-                Span::styled("^C", Style::default().fg(self.accent)),
-                Span::styled(" cancel ", Style::default().fg(self.status_fg)),
-                Span::styled("^Q", Style::default().fg(self.accent)),
-                Span::styled(" quit", Style::default().fg(self.status_fg)),
+                Span::styled(" [", border),
+                Span::styled("^O", key),
+                Span::styled(" Model", label),
+                Span::styled("] ", border),
+                Span::styled("[", border),
+                Span::styled("^K", key),
+                Span::styled(" Cmd", label),
+                Span::styled("] ", border),
+                Span::styled("[", border),
+                Span::styled("^D", key),
+                Span::styled(" Dashboard", label),
+                Span::styled("] ", border),
+                Span::styled("[", border),
+                Span::styled("^G", key),
+                Span::styled(" Signet", label),
+                Span::styled("] ", border),
+                Span::styled("[", border),
+                Span::styled("^C", key),
+                Span::styled(" Cancel", label),
+                Span::styled("] ", border),
+                Span::styled("[", border),
+                Span::styled("^Q", key),
+                Span::styled(" Quit", label),
+                Span::styled("]", border),
             ]);
 
             buf.set_line(area.x, area.y + 1, &keys_line, area.width);
