@@ -52,8 +52,8 @@ Ask Forge to read a file, edit code, run a test — it executes tools, loops bac
 **Goal:** Support all major providers with runtime hot-switching.
 
 ### What gets built
-- [ ] Provider implementations: OpenAI, Gemini, Groq, Ollama, OpenRouter
-- [ ] Model picker UI (Ctrl+O) — dropdown overlay showing all available models from daemon's model registry
+- [x] Provider implementations: OpenAI, Gemini, Groq, Ollama, OpenRouter, xAI
+- [x] Model picker UI (Ctrl+O) — dropdown overlay with filter, arrow navigation, Enter to select
 - [ ] Connect to daemon's `GET /api/pipeline/model-registry` for dynamic model discovery
 - [ ] Extraction model sync — changing the primary model optionally updates the extraction model in agent.yaml
 - [ ] Config file watching with `notify` crate — real-time response to agent.yaml changes

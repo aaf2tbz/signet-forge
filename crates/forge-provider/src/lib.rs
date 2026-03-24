@@ -1,4 +1,6 @@
 pub mod anthropic;
+pub mod gemini;
+pub mod openai;
 pub mod streaming;
 
 use async_trait::async_trait;
@@ -79,8 +81,30 @@ pub fn create_provider(
             model.to_string(),
             api_key.to_string(),
         ))),
+        "openai" => Ok(Box::new(openai::openai(model, api_key))),
+        "gemini" | "google" => Ok(Box::new(gemini::GeminiProvider::new(
+            model.to_string(),
+            api_key.to_string(),
+        ))),
+        "groq" => Ok(Box::new(openai::groq(model, api_key))),
+        "ollama" => Ok(Box::new(openai::ollama(model))),
+        "openrouter" => Ok(Box::new(openai::openrouter(model, api_key))),
+        "xai" => Ok(Box::new(openai::xai(model, api_key))),
         other => Err(ForgeError::provider(format!(
-            "Unknown provider: {other}. Available: anthropic"
+            "Unknown provider: {other}. Available: anthropic, openai, gemini, groq, ollama, openrouter, xai"
         ))),
     }
+}
+
+/// List all available provider names
+pub fn available_providers() -> &'static [&'static str] {
+    &[
+        "anthropic",
+        "openai",
+        "gemini",
+        "groq",
+        "ollama",
+        "openrouter",
+        "xai",
+    ]
 }

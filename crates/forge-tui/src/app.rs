@@ -1,13 +1,15 @@
 use crate::input::{key_to_action, Action};
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
+use crate::views::model_picker::ModelPicker;
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
 use forge_agent::{
     AgentEvent, AgentLoop, PermissionManager, PermissionRequest, PermissionResponse, Session,
     SharedSession,
 };
-use forge_provider::Provider;
+use forge_provider::{self, Provider};
 use forge_signet::hooks::SessionHooks;
+use forge_signet::secrets::resolve_api_key;
 use forge_signet::SignetClient;
 use ratatui::{
     layout::{Constraint, Layout},
@@ -18,7 +20,7 @@ use ratatui::{
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Permission dialog state
 struct PermissionDialog {
@@ -60,6 +62,14 @@ pub struct App {
     permission_rx: mpsc::Receiver<PermissionRequest>,
     /// Active permission dialog
     permission_dialog: Option<PermissionDialog>,
+    /// Model picker overlay
+    model_picker: Option<ModelPicker>,
+    /// Signet client for API key resolution on model switch
+    signet_client: Option<SignetClient>,
+    /// Shared permissions manager
+    permissions: Arc<Mutex<PermissionManager>>,
+    /// System prompt
+    system_prompt: String,
     /// The agent loop
     agent: Arc<AgentLoop>,
 }
@@ -121,8 +131,8 @@ impl App {
             hooks,
             event_tx,
             permission_tx,
-            permissions,
-            system_prompt,
+            Arc::clone(&permissions),
+            system_prompt.clone(),
         ));
 
         Self {
@@ -142,6 +152,10 @@ impl App {
             event_rx,
             permission_rx,
             permission_dialog: None,
+            model_picker: None,
+            signet_client,
+            permissions,
+            system_prompt,
             agent,
         }
     }
@@ -259,6 +273,11 @@ impl App {
         if let Some(dialog) = &self.permission_dialog {
             self.draw_permission_dialog(frame, dialog);
         }
+
+        // Model picker overlay
+        if let Some(picker) = &self.model_picker {
+            picker.draw(frame);
+        }
     }
 
     fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
@@ -331,6 +350,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If model picker is open, handle picker keys
+        if self.model_picker.is_some() {
+            self.handle_model_picker_key(key).await;
+            return;
+        }
+
         // If permission dialog is open, handle dialog keys
         if self.permission_dialog.is_some() {
             self.handle_permission_key(key).await;
@@ -395,6 +420,9 @@ impl App {
             Action::Quit => {
                 self.should_quit = true;
             }
+            Action::ModelPicker if !self.processing => {
+                self.model_picker = Some(ModelPicker::new());
+            }
             Action::ClearScreen => {
                 self.entries.clear();
                 self.streaming_text.clear();
@@ -402,6 +430,124 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    async fn handle_model_picker_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Esc => {
+                self.model_picker = None;
+            }
+            KeyCode::Up => {
+                if let Some(picker) = &mut self.model_picker {
+                    picker.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(picker) = &mut self.model_picker {
+                    picker.move_down();
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(picker) = &mut self.model_picker {
+                    picker.backspace();
+                }
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                if let Some(picker) = &mut self.model_picker {
+                    picker.type_char(c);
+                }
+            }
+            KeyCode::Enter => {
+                let selection = self
+                    .model_picker
+                    .as_ref()
+                    .and_then(|p| p.selected_model().cloned());
+                self.model_picker = None;
+
+                if let Some(entry) = selection {
+                    self.switch_model(&entry.provider, &entry.model, entry.context_window)
+                        .await;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn switch_model(&mut self, provider_name: &str, model: &str, context_window: usize) {
+        // Resolve API key for the new provider
+        let api_key = if provider_name == "ollama" {
+            "ollama".to_string()
+        } else if let Some(client) = &self.signet_client {
+            match resolve_api_key(client, provider_name).await {
+                Ok(key) => key,
+                Err(e) => {
+                    self.entries.push(ChatEntry::Error(format!(
+                        "Failed to resolve API key for {provider_name}: {e}"
+                    )));
+                    return;
+                }
+            }
+        } else {
+            // Try env var
+            let var_name = format!("{}_API_KEY", provider_name.to_uppercase());
+            match std::env::var(&var_name) {
+                Ok(key) if !key.is_empty() => key,
+                _ => {
+                    self.entries.push(ChatEntry::Error(format!(
+                        "No API key for {provider_name}. Set {var_name} or add to Signet secrets."
+                    )));
+                    return;
+                }
+            }
+        };
+
+        // Create new provider
+        let new_provider: Arc<dyn Provider> =
+            match forge_provider::create_provider(provider_name, model, &api_key) {
+                Ok(p) => Arc::from(p),
+                Err(e) => {
+                    self.entries
+                        .push(ChatEntry::Error(format!("Failed to create provider: {e}")));
+                    return;
+                }
+            };
+
+        // Rebuild agent with new provider
+        let cwd = std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string());
+        let session_id = self.session.lock().await.id.clone();
+
+        let hooks = self.signet_client.as_ref().map(|client| {
+            SessionHooks::new(client.clone(), session_id, cwd)
+        });
+
+        let (event_tx, event_rx) = mpsc::channel::<AgentEvent>(256);
+        let (permission_tx, permission_rx) = mpsc::channel::<PermissionRequest>(8);
+
+        self.agent = Arc::new(AgentLoop::new(
+            new_provider,
+            hooks,
+            event_tx,
+            permission_tx,
+            Arc::clone(&self.permissions),
+            self.system_prompt.clone(),
+        ));
+
+        self.event_rx = event_rx;
+        self.permission_rx = permission_rx;
+        self.model = model.to_string();
+        self.provider_name = provider_name.to_string();
+        self.context_window = context_window;
+
+        self.entries.push(ChatEntry::Status(format!(
+            "Switched to {} ({})",
+            model, provider_name
+        )));
+
+        info!("Model switched to {model} ({provider_name})");
     }
 
     async fn handle_permission_key(&mut self, key: crossterm::event::KeyEvent) {
