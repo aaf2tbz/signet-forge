@@ -110,6 +110,8 @@ pub struct App {
     processing_phase: ProcessingPhase,
     /// Animation tick counter (increments every frame)
     tick: usize,
+    /// Handle to the current agent task (for cancellation)
+    agent_task: Option<tokio::task::JoinHandle<()>>,
     /// Should quit?
     should_quit: bool,
     /// Agent event receiver
@@ -279,6 +281,7 @@ impl App {
             processing: false,
             processing_phase: ProcessingPhase::Idle,
             tick: 0,
+            agent_task: None,
             should_quit: false,
             event_rx,
             permission_rx,
@@ -637,9 +640,9 @@ impl App {
 
                     let agent = Arc::clone(&self.agent);
                     let session = Arc::clone(&self.session);
-                    tokio::spawn(async move {
+                    self.agent_task = Some(tokio::spawn(async move {
                         agent.process_message(&session, &input).await;
-                    });
+                    }));
                 }
             }
             Action::InsertChar(c) if !self.processing => {
@@ -675,8 +678,18 @@ impl App {
             }
             Action::Cancel => {
                 if self.processing {
+                    // Abort the running agent task (kills CLI subprocess too)
+                    if let Some(handle) = self.agent_task.take() {
+                        handle.abort();
+                    }
+                    // Flush any partial streaming text
+                    if !self.streaming_text.is_empty() {
+                        self.entries
+                            .push(ChatEntry::AssistantText(self.streaming_text.clone()));
+                        self.streaming_text.clear();
+                    }
                     self.processing = false;
-                    self.streaming_text.clear();
+                    self.processing_phase = ProcessingPhase::Idle;
                     self.entries.push(ChatEntry::Status("Cancelled.".to_string()));
                 }
             }
