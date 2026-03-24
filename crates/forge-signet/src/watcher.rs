@@ -1,7 +1,6 @@
 use crate::config::{agent_yaml_path, load_agent_config, AgentConfig};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
 /// Events emitted when agent.yaml changes

@@ -6,7 +6,6 @@ use crate::views::model_picker::ModelPicker;
 use crate::views::signet_commands::{self, CommandPicker};
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::terminal;
 use forge_agent::{
     AgentEvent, AgentLoop, PermissionManager, PermissionRequest, PermissionResponse, Session,
     SessionStore, SharedSession,
@@ -47,16 +46,6 @@ enum ProcessingPhase {
 impl ProcessingPhase {
     /// Spinner frames — Signet-themed geometric sequence
     const FRAMES: &[&str] = &["◇", "◈", "◆", "◈"];
-
-    fn label(&self) -> &str {
-        match self {
-            Self::Idle => "",
-            Self::RecallingMemories => "Recalling memories",
-            Self::Thinking => "Thinking",
-            Self::Streaming => "",
-            Self::ExecutingTool(_) => "Executing",
-        }
-    }
 
     fn render(&self, tick: usize) -> String {
         let frame = Self::FRAMES[tick % Self::FRAMES.len()];
@@ -385,8 +374,8 @@ impl App {
                 && !self.input.starts_with('/')
                 && self.input != self.speculative_query
                 && self.last_keystroke.elapsed() > std::time::Duration::from_millis(500)
-                && self.signet_client.is_some()
             {
+                if let Some(signet) = &self.signet_client {
                 let query = self.input.clone();
                 self.speculative_query = query.clone();
 
@@ -395,7 +384,7 @@ impl App {
                     handle.abort();
                 }
 
-                let client = self.signet_client.as_ref().unwrap().clone();
+                let client = signet.clone();
                 let cache = self.recall_cache.clone();
                 self.speculative_handle = Some(tokio::spawn(async move {
                     // Call daemon recall and store result in shared cache
@@ -423,6 +412,7 @@ impl App {
                         }
                     }
                 }));
+            }
             }
 
             if self.should_quit {
@@ -1016,7 +1006,7 @@ impl App {
                                     current.as_str()
                                 )));
                             } else {
-                                let new_effort = forge_provider::ReasoningEffort::from_str(args);
+                                let new_effort = forge_provider::ReasoningEffort::parse(args);
                                 *self.effort.lock().await = new_effort;
                                 self.entries.push(ChatEntry::Status(format!(
                                     "Effort set to: {}", new_effort.as_str()
@@ -1363,15 +1353,11 @@ impl App {
             }
             // Enter confirms current selection
             KeyCode::Enter => {
-                if let Some(dialog) = &self.permission_dialog {
-                    Some(match dialog.selected {
+                self.permission_dialog.as_ref().map(|dialog| match dialog.selected {
                         0 => PermissionResponse::Allow,
                         1 => PermissionResponse::AlwaysAllow,
                         _ => PermissionResponse::Deny,
                     })
-                } else {
-                    None
-                }
             }
             // Arrow keys to navigate options
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
@@ -1578,36 +1564,6 @@ impl App {
                 false
             }
         }
-    }
-}
-
-/// Parse memory count from Signet's injection response.
-/// Looks for "results=N" pattern or counts "- " prefixed memory lines.
-fn parse_memory_count(context: &str) -> usize {
-    // Try parsing "results=N" from Signet recall header
-    for segment in context.split('|') {
-        let trimmed = segment.trim();
-        if let Some(rest) = trimmed.strip_prefix("results=") {
-            if let Ok(n) = rest.trim().parse::<usize>() {
-                return n;
-            }
-        }
-    }
-
-    // Fallback: count lines starting with "- " (memory entries)
-    let entry_count = context
-        .lines()
-        .filter(|l| l.starts_with("- "))
-        .count();
-    if entry_count > 0 {
-        return entry_count;
-    }
-
-    // Last fallback: if there's any content, report at least 1
-    if !context.trim().is_empty() {
-        1
-    } else {
-        0
     }
 }
 

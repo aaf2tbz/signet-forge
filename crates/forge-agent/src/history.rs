@@ -62,6 +62,7 @@ impl SessionStore {
     }
 
     /// Save a session to the database
+    #[allow(clippy::too_many_arguments)]
     pub fn save_session(
         &self,
         id: &str,

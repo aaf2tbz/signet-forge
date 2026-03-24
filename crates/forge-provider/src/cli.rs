@@ -390,7 +390,7 @@ impl Provider for CliProvider {
                         let code = status.code().unwrap_or(-1);
                         let mut stderr_text = String::new();
                         if let Some(se) = stderr {
-                            let mut se_reader = BufReader::new(se);
+                            let se_reader = BufReader::new(se);
                             let mut se_lines = se_reader.lines();
                             while let Ok(Some(line)) = se_lines.next_line().await {
                                 stderr_text.push_str(&line);

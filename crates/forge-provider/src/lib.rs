@@ -49,7 +49,7 @@ impl ReasoningEffort {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "low" | "l" => Self::Low,
             "high" | "h" => Self::High,

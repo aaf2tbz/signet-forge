@@ -222,6 +222,12 @@ pub struct CommandPicker {
     pub filter: String,
 }
 
+impl Default for CommandPicker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommandPicker {
     pub fn new() -> Self {
         Self {

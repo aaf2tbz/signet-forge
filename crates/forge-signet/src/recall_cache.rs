@@ -23,6 +23,12 @@ struct CacheEntry {
     created: Instant,
 }
 
+impl Default for RecallCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RecallCache {
     pub fn new() -> Self {
         Self {

@@ -53,7 +53,7 @@ impl Tool for BashTool {
 
         debug!("Executing bash command: {command}");
 
-        let mut child = match Command::new("bash")
+        let child = match Command::new("bash")
             .arg("-c")
             .arg(command)
             .stdout(std::process::Stdio::piped())

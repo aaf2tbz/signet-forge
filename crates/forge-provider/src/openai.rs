@@ -195,7 +195,7 @@ impl Provider for OpenAIProvider {
 
         let mut req = self
             .client
-            .post(&format!("{}/chat/completions", self.base_url))
+            .post(format!("{}/chat/completions", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json");
 
@@ -293,6 +293,7 @@ struct ChunkDelta {
 #[derive(Debug, Deserialize)]
 struct ChunkToolCall {
     #[serde(default)]
+    #[allow(dead_code)]
     index: usize,
     #[serde(default)]
     id: Option<String>,

@@ -4,7 +4,7 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    style::{self, Stylize},
+    style::Stylize,
     terminal,
 };
 use forge_provider::create_provider;
@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
             _ => unreachable!(),
         };
         info!("Using CLI provider: {cli_path}");
-        Arc::from(forge_provider::create_cli_provider(kind, &cli_path, &model))
+        Arc::from(forge_provider::create_cli_provider(kind, cli_path, &model))
     } else {
         // API provider — resolve key
         let api_key =
@@ -487,9 +487,7 @@ fn interactive_provider_select(providers: &[&DiscoveredProvider]) -> Result<Disc
             }
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if selected > 0 {
-                        selected -= 1;
-                    }
+                    selected = selected.saturating_sub(1);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if selected < providers.len() - 1 {

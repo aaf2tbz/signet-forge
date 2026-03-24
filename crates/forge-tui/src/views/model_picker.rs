@@ -24,6 +24,12 @@ pub struct ModelPicker {
     pub filter: String,
 }
 
+impl Default for ModelPicker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelPicker {
     pub fn new() -> Self {
         Self {

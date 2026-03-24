@@ -43,24 +43,24 @@ impl GeminiProvider {
                 let parts: Vec<Value> = m
                     .content
                     .iter()
-                    .filter_map(|c| match c {
-                        MessageContent::Text { text } => Some(json!({ "text": text })),
-                        MessageContent::ToolUse { name, input, .. } => Some(json!({
+                    .map(|c| match c {
+                        MessageContent::Text { text } => json!({ "text": text }),
+                        MessageContent::ToolUse { name, input, .. } => json!({
                             "functionCall": {
                                 "name": name,
                                 "args": input,
                             }
-                        })),
+                        }),
                         MessageContent::ToolResult {
                             tool_use_id: _,
                             content,
                             ..
-                        } => Some(json!({
+                        } => json!({
                             "functionResponse": {
                                 "name": "tool",
                                 "response": { "result": content },
                             }
-                        })),
+                        }),
                     })
                     .collect();
 
