@@ -52,6 +52,8 @@ pub struct AgentLoop {
     tool_definitions: Vec<ToolDefinition>,
     /// Current reasoning effort level (shared with TUI via Arc<Mutex>)
     effort: Arc<Mutex<ReasoningEffort>>,
+    /// CLI permission bypass (shared with TUI via Arc<Mutex>)
+    bypass: Arc<Mutex<bool>>,
 }
 
 impl AgentLoop {
@@ -63,6 +65,7 @@ impl AgentLoop {
         permissions: Arc<Mutex<PermissionManager>>,
         system_prompt: String,
         effort: Arc<Mutex<ReasoningEffort>>,
+        bypass: Arc<Mutex<bool>>,
     ) -> Self {
         let context_window = provider.context_window();
         let tool_definitions = forge_tools::all_definitions();
@@ -76,6 +79,7 @@ impl AgentLoop {
             system_prompt,
             tool_definitions,
             effort,
+            bypass,
         }
     }
 
@@ -140,11 +144,13 @@ impl AgentLoop {
             };
 
             let current_effort = *self.effort.lock().await;
+            let current_bypass = *self.bypass.lock().await;
 
             let opts = CompletionOpts {
                 system_prompt: Some(full_system),
                 max_tokens: Some(8192),
                 effort: current_effort,
+                bypass: current_bypass,
                 ..Default::default()
             };
 

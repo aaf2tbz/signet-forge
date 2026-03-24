@@ -99,6 +99,8 @@ pub struct App {
     detected_clis: Vec<(forge_provider::cli::CliKind, String)>,
     /// Current reasoning effort level (shared with agent loop)
     effort: Arc<Mutex<forge_provider::ReasoningEffort>>,
+    /// CLI permission bypass — skips all approval prompts on next spawn
+    bypass: Arc<Mutex<bool>>,
     /// Memories recalled for current prompt
     memories_injected: usize,
     /// Total memories in database
@@ -235,6 +237,7 @@ impl App {
         ])));
 
         let effort = Arc::new(Mutex::new(forge_provider::ReasoningEffort::default()));
+        let bypass = Arc::new(Mutex::new(false));
 
         let agent = Arc::new(AgentLoop::new(
             provider,
@@ -244,6 +247,7 @@ impl App {
             Arc::clone(&permissions),
             system_prompt.clone(),
             Arc::clone(&effort),
+            Arc::clone(&bypass),
         ));
 
         // Start config watcher
@@ -301,6 +305,7 @@ impl App {
             cli_path,
             detected_clis: Vec::new(),
             effort,
+            bypass,
             memories_injected,
             total_memories,
             daemon_healthy,
@@ -1157,6 +1162,23 @@ impl App {
                                 )));
                             }
                         }
+                        "forge-bypass" => {
+                            let mut b = self.bypass.lock().await;
+                            *b = !*b;
+                            let state = if *b { "ON" } else { "OFF" };
+                            let detail = if *b {
+                                match self.provider_name.as_str() {
+                                    n if n.contains("claude") => " (--dangerously-skip-permissions)",
+                                    n if n.contains("codex") => " (--dangerously-bypass-approvals-and-sandbox)",
+                                    _ => "",
+                                }
+                            } else {
+                                ""
+                            };
+                            self.entries.push(ChatEntry::Status(format!(
+                                "Permission bypass: {state}{detail}"
+                            )));
+                        }
                         _ => {}
                     }
                 }
@@ -1466,6 +1488,7 @@ impl App {
             Arc::clone(&self.permissions),
             self.system_prompt.clone(),
             Arc::clone(&self.effort),
+            Arc::clone(&self.bypass),
         ));
 
         self.event_rx = event_rx;

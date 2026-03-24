@@ -68,6 +68,8 @@ pub struct CompletionOpts {
     pub thinking: Option<ThinkingConfig>,
     /// Reasoning effort level (low/medium/high)
     pub effort: ReasoningEffort,
+    /// Skip permission prompts on CLI providers
+    pub bypass: bool,
 }
 
 #[derive(Debug, Clone)]

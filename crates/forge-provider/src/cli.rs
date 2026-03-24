@@ -32,7 +32,7 @@ impl CliProvider {
     }
 
     /// Build the command arguments for each CLI tool
-    fn build_args(&self, prompt: &str, effort: crate::ReasoningEffort) -> Vec<String> {
+    fn build_args(&self, prompt: &str, opts: &crate::CompletionOpts) -> Vec<String> {
         match self.cli_kind {
             CliKind::Claude => {
                 let mut args = vec![
@@ -46,25 +46,29 @@ impl CliProvider {
                     args.push("--model".to_string());
                     args.push(self.model.clone());
                 }
-                // Claude CLI doesn't support --reasoning-effort flag;
-                // effort is handled at the API level, not the CLI level
+                if opts.bypass {
+                    args.push("--dangerously-skip-permissions".to_string());
+                }
                 args
             }
             CliKind::Codex => {
                 let mut args = vec![
                     "exec".to_string(),
                     "--json".to_string(),
-                    "--sandbox".to_string(),
-                    "read-only".to_string(),
                 ];
+                if opts.bypass {
+                    args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+                } else {
+                    args.push("--sandbox".to_string());
+                    args.push("read-only".to_string());
+                }
                 if !self.model.is_empty() {
                     args.push("--model".to_string());
                     args.push(self.model.clone());
                 }
-                // Codex supports --reasoning-effort for o-series models
-                if effort != crate::ReasoningEffort::Medium {
+                if opts.effort != crate::ReasoningEffort::Medium {
                     args.push("--reasoning-effort".to_string());
-                    args.push(effort.as_str().to_string());
+                    args.push(opts.effort.as_str().to_string());
                 }
                 args.push(prompt.to_string());
                 args
@@ -75,6 +79,7 @@ impl CliProvider {
                     args.push("--model".to_string());
                     args.push(self.model.clone());
                 }
+                // Gemini has no permission bypass — sandbox is off by default
                 args
             }
         }
@@ -178,7 +183,7 @@ impl Provider for CliProvider {
         opts: &CompletionOpts,
     ) -> Result<CompletionStream, ForgeError> {
         let prompt = Self::build_prompt(messages, opts);
-        let args = self.build_args(&prompt, opts.effort);
+        let args = self.build_args(&prompt, opts);
 
         debug!(
             "Spawning CLI via PTY: {} {}",

@@ -86,6 +86,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             kind: CommandKind::Internal("effort"),
         },
         SignetCommand {
+            key: "forge-bypass",
+            label: "/forge-bypass",
+            description: "Toggle CLI permission bypass (skip all approval prompts)",
+            kind: CommandKind::Internal("forge-bypass"),
+        },
+        SignetCommand {
             key: "keybinds",
             label: "/keybinds",
             description: "Show current key bindings (edit ~/.config/forge/keybinds.json)",
