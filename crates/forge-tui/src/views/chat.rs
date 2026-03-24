@@ -212,8 +212,19 @@ impl<'a> Widget for ChatView<'a> {
             }
         }
 
-        // Auto-scroll: if scroll_offset is 0, show the bottom
-        let total_lines = lines.len() as u16;
+        // Calculate wrapped line count — each Line may span multiple visual rows
+        let width = area.width as usize;
+        let total_lines: u16 = if width == 0 {
+            lines.len() as u16
+        } else {
+            lines
+                .iter()
+                .map(|line| {
+                    let content_width: usize = line.spans.iter().map(|s| s.content.len()).sum();
+                    1u16.max(((content_width + width - 1) / width) as u16)
+                })
+                .sum()
+        };
         let visible_lines = area.height;
         let scroll = if self.scroll_offset == 0 {
             total_lines.saturating_sub(visible_lines)
