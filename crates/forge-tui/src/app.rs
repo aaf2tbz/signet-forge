@@ -3,6 +3,7 @@ use crate::keybinds::KeyBindConfig;
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
 use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPalette};
 use crate::views::dashboard_nav::DashboardNav;
+use crate::views::keybind_editor::KeybindEditor;
 use crate::views::model_picker::ModelPicker;
 use crate::views::signet_commands::{self, CommandPicker};
 use crate::widgets::status_bar::StatusBar;
@@ -126,6 +127,8 @@ pub struct App {
     command_picker: Option<CommandPicker>,
     /// Dashboard navigator (Ctrl+Tab)
     dashboard_nav: Option<DashboardNav>,
+    /// Keybind editor overlay
+    keybind_editor: Option<KeybindEditor>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
@@ -150,6 +153,22 @@ pub struct App {
 }
 
 impl App {
+    /// Convert char-based cursor position to byte index in self.input.
+    /// Cursor is stored as a char offset (not byte offset) so it never
+    /// lands between bytes of a multi-byte character.
+    fn cursor_byte_pos(&self) -> usize {
+        self.input
+            .char_indices()
+            .nth(self.cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input.len())
+    }
+
+    /// Character count of the input (not byte length).
+    fn input_char_len(&self) -> usize {
+        self.input.chars().count()
+    }
+
     pub async fn new(
         provider: Arc<dyn Provider>,
         signet_client: Option<SignetClient>,
@@ -294,6 +313,7 @@ impl App {
             command_palette: None,
             command_picker: None,
             dashboard_nav: None,
+            keybind_editor: None,
             skills,
             signet_client,
             permissions,
@@ -345,6 +365,30 @@ impl App {
             // Drain agent events
             while let Ok(event) = self.event_rx.try_recv() {
                 self.handle_agent_event(event);
+            }
+
+            // Safety: if agent task finished but processing is still true,
+            // the TurnComplete event was lost — force-reset to unblock input
+            if self.processing {
+                if let Some(handle) = &self.agent_task {
+                    if handle.is_finished() {
+                        // Drain any remaining events one more time
+                        while let Ok(event) = self.event_rx.try_recv() {
+                            self.handle_agent_event(event);
+                        }
+                        // Still stuck? Force reset
+                        if self.processing {
+                            if !self.streaming_text.is_empty() {
+                                self.entries
+                                    .push(ChatEntry::AssistantText(self.streaming_text.clone()));
+                                self.streaming_text.clear();
+                            }
+                            self.processing = false;
+                            self.processing_phase = ProcessingPhase::Idle;
+                            self.agent_task = None;
+                        }
+                    }
+                }
             }
 
             // Check for permission requests
@@ -560,6 +604,12 @@ impl App {
             let area = frame.area();
             nav.render_themed(area, frame.buffer_mut(), &self.theme);
         }
+
+        // Keybind editor overlay
+        if let Some(editor) = &self.keybind_editor {
+            let area = frame.area();
+            editor.render_themed(area, frame.buffer_mut(), &self.theme);
+        }
     }
 
     fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
@@ -572,8 +622,10 @@ impl App {
         let y = (area.height.saturating_sub(dialog_height)) / 2;
         let dialog_area = ratatui::layout::Rect::new(x, y, dialog_width, dialog_height);
 
-        // Clear the area behind the dialog
+        // Clear the area behind the dialog and fill with themed bg
         frame.render_widget(Clear, dialog_area);
+        let bg_block = Block::default().style(Style::default().bg(self.theme.dialog_bg));
+        frame.render_widget(bg_block, dialog_area);
 
         // Build dialog content
         let input_preview = serde_json::to_string_pretty(&dialog.tool_input)
@@ -635,6 +687,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If keybind editor is open, handle its keys (including capture mode)
+        if self.keybind_editor.is_some() {
+            self.handle_keybind_editor_key(key);
+            return;
+        }
+
         // If dashboard navigator is open, handle nav keys
         if self.dashboard_nav.is_some() {
             self.handle_dashboard_nav_key(key).await;
@@ -717,29 +775,32 @@ impl App {
                 if self.input.is_empty() {
                     self.entries.retain(|e| !matches!(e, ChatEntry::Ephemeral(_)));
                 }
-                self.input.insert(self.cursor, c);
+                let byte_pos = self.cursor_byte_pos();
+                self.input.insert(byte_pos, c);
                 self.cursor += 1;
                 self.last_keystroke = std::time::Instant::now();
             }
             Action::Backspace if !self.processing && self.cursor > 0 => {
                 self.last_keystroke = std::time::Instant::now();
                 self.cursor -= 1;
-                self.input.remove(self.cursor);
+                let byte_pos = self.cursor_byte_pos();
+                self.input.remove(byte_pos);
             }
-            Action::Delete if !self.processing && self.cursor < self.input.len() => {
-                self.input.remove(self.cursor);
+            Action::Delete if !self.processing && self.cursor < self.input_char_len() => {
+                let byte_pos = self.cursor_byte_pos();
+                self.input.remove(byte_pos);
             }
             Action::CursorLeft if self.cursor > 0 => {
                 self.cursor -= 1;
             }
-            Action::CursorRight if self.cursor < self.input.len() => {
+            Action::CursorRight if self.cursor < self.input_char_len() => {
                 self.cursor += 1;
             }
             Action::Home => {
                 self.cursor = 0;
             }
             Action::End => {
-                self.cursor = self.input.len();
+                self.cursor = self.input_char_len();
             }
             Action::ScrollUp => {
                 self.scroll_offset = self.scroll_offset.saturating_add(3);
@@ -797,6 +858,50 @@ impl App {
             }
             Action::Dashboard if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_keybind_editor_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        // If capturing, forward the key to the editor
+        if let Some(editor) = &mut self.keybind_editor {
+            if editor.capturing {
+                editor.capture_key(key);
+                // Reload keybinds into the app after save
+                if !editor.capturing {
+                    self.keybinds = editor.config.clone();
+                }
+                return;
+            }
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.keybind_editor = None;
+            }
+            KeyCode::Up => {
+                if let Some(editor) = &mut self.keybind_editor {
+                    editor.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(editor) = &mut self.keybind_editor {
+                    editor.move_down();
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(editor) = &mut self.keybind_editor {
+                    editor.start_capture();
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                if let Some(editor) = &mut self.keybind_editor {
+                    editor.reset_selected();
+                    self.keybinds = editor.config.clone();
+                }
             }
             _ => {}
         }
@@ -922,12 +1027,13 @@ impl App {
             }
         }
 
-        // Regular text paste — insert at cursor
+        // Regular text paste — insert at cursor (char-safe)
         for c in trimmed.chars() {
             if c == '\n' {
                 self.input.push('\n');
             } else {
-                self.input.insert(self.cursor, c);
+                let byte_pos = self.cursor_byte_pos();
+                self.input.insert(byte_pos, c);
                 self.cursor += 1;
             }
         }
@@ -1039,10 +1145,7 @@ impl App {
                             }
                         }
                         "keybinds" => {
-                            let text = self.keybinds.display_text();
-                            self.entries.push(ChatEntry::Ephemeral(text));
-                            // Save defaults if config doesn't exist yet
-                            let _ = self.keybinds.save();
+                            self.keybind_editor = Some(KeybindEditor::new());
                         }
                         "effort" => {
                             if args.is_empty() {
@@ -1250,7 +1353,7 @@ impl App {
                 )));
                 // Prepend skill content to input for next submission
                 self.input = format!("[Skill: {}] ", cmd.name);
-                self.cursor = self.input.len();
+                self.cursor = self.input_char_len();
             }
         }
     }

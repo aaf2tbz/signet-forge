@@ -191,9 +191,17 @@ impl DashboardNav {
         let popup = Rect::new(x, y, width, height);
 
         Clear.render(popup, buf);
+        // Fill with themed dialog background
+        for row in popup.y..popup.y + popup.height {
+            for col in popup.x..popup.x + popup.width {
+                if col < buf.area().width && row < buf.area().height {
+                    buf[(col, row)].set_bg(theme.dialog_bg);
+                }
+            }
+        }
 
         let block = Block::default()
-            .title(" Dashboard (Ctrl+Tab) ")
+            .title(" Dashboard (Ctrl+D) ")
             .title_style(
                 Style::default()
                     .fg(theme.accent)

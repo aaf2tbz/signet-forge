@@ -150,6 +150,8 @@ impl ModelPicker {
         let dialog_area = Rect::new(x, y, width, height);
 
         frame.render_widget(Clear, dialog_area);
+        let bg_block = Block::default().style(Style::default().bg(theme.dialog_bg));
+        frame.render_widget(bg_block, dialog_area);
 
         let filtered = self.filtered_models();
         let mut lines = Vec::new();
@@ -242,7 +244,7 @@ fn format_context(tokens: usize) -> String {
     }
 }
 
-fn default_models() -> Vec<ModelEntry> {
+pub fn default_models() -> Vec<ModelEntry> {
     vec![
         ModelEntry { provider: "anthropic".into(), model: "claude-opus-4-6".into(), display_name: "Claude Opus 4.6".into(), context_window: 200_000, cli_path: None },
         ModelEntry { provider: "anthropic".into(), model: "claude-sonnet-4-6".into(), display_name: "Claude Sonnet 4.6".into(), context_window: 200_000, cli_path: None },

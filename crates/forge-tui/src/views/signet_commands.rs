@@ -289,8 +289,15 @@ impl CommandPicker {
         let y = area.y + (area.height.saturating_sub(height)) / 2;
         let popup = Rect::new(x, y, width, height);
 
-        // Clear background
+        // Clear background and fill with themed dialog bg
         Clear.render(popup, buf);
+        for row in popup.y..popup.y + popup.height {
+            for col in popup.x..popup.x + popup.width {
+                if col < buf.area().width && row < buf.area().height {
+                    buf[(col, row)].set_bg(theme.dialog_bg);
+                }
+            }
+        }
 
         let block = Block::default()
             .title(" Signet Commands (Ctrl+G) ")
@@ -423,6 +430,25 @@ pub fn help_text() -> String {
     text
 }
 
+/// Argument suggestions for commands that take parameters
+struct ArgSuggestion {
+    value: &'static str,
+    description: &'static str,
+}
+
+const EFFORT_ARGS: &[ArgSuggestion] = &[
+    ArgSuggestion { value: "low", description: "Minimal reasoning, fast responses" },
+    ArgSuggestion { value: "medium", description: "Balanced reasoning (default)" },
+    ArgSuggestion { value: "high", description: "Deep reasoning, slower responses" },
+];
+
+const THEME_ARGS: &[ArgSuggestion] = &[
+    ArgSuggestion { value: "signet-dark", description: "Industrial monochrome (default)" },
+    ArgSuggestion { value: "signet-light", description: "Warm beige, never pure white" },
+    ArgSuggestion { value: "midnight", description: "Deep blue-black, cool accents" },
+    ArgSuggestion { value: "amber", description: "Warm retro terminal" },
+];
+
 /// Render a slash command autocomplete dropdown above the input area.
 /// Shows filtered commands as greyed-out suggestions.
 pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer, theme: &Theme) {
@@ -430,6 +456,36 @@ pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer, theme: &Th
     if query.is_empty() {
         render_suggestions(&all_commands(), area, buf, theme);
         return;
+    }
+
+    // Check for argument-level autocomplete (e.g. "/effort l", "/model cl", "/theme s")
+    if let Some((cmd, arg_prefix)) = query.split_once(' ') {
+        let arg_lower = arg_prefix.to_lowercase();
+        match cmd {
+            "effort" => {
+                let filtered: Vec<&ArgSuggestion> = EFFORT_ARGS.iter()
+                    .filter(|a| arg_lower.is_empty() || a.value.starts_with(&arg_lower))
+                    .collect();
+                if !filtered.is_empty() {
+                    render_arg_suggestions(&filtered, area, buf, theme);
+                }
+                return;
+            }
+            "theme" => {
+                let filtered: Vec<&ArgSuggestion> = THEME_ARGS.iter()
+                    .filter(|a| arg_lower.is_empty() || a.value.starts_with(&arg_lower))
+                    .collect();
+                if !filtered.is_empty() {
+                    render_arg_suggestions(&filtered, area, buf, theme);
+                }
+                return;
+            }
+            "model" => {
+                render_model_suggestions(&arg_lower, area, buf, theme);
+                return;
+            }
+            _ => return, // No arg suggestions for other commands
+        }
     }
 
     let query_lower = query.to_lowercase();
@@ -488,6 +544,92 @@ fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer, 
         if more_row < buf.area().height {
             let more = Span::styled(
                 format!(" ... {} more", commands.len() - max_show),
+                Style::default().fg(theme.muted),
+            );
+            buf.set_line(popup.x, more_row, &Line::from(more), popup.width);
+        }
+    }
+}
+
+fn render_arg_suggestions(args: &[&ArgSuggestion], area: Rect, buf: &mut Buffer, theme: &Theme) {
+    let max_show = args.len();
+    let height = (max_show + 1) as u16;
+    let width = 50u16.min(area.width.saturating_sub(4));
+    let y = area.y.saturating_sub(height + 1);
+    let x = area.x + 2;
+    let popup = Rect::new(x, y, width, height);
+
+    for row in popup.y..popup.y + popup.height {
+        for col in popup.x..popup.x + popup.width {
+            if col < buf.area().width && row < buf.area().height {
+                buf[(col, row)].set_char(' ').set_bg(theme.surface);
+            }
+        }
+    }
+
+    for (i, arg) in args.iter().enumerate() {
+        let row = popup.y + i as u16;
+        if row >= buf.area().height {
+            break;
+        }
+        let line = Line::from(vec![
+            Span::styled(format!(" {:<14}", arg.value), Style::default().fg(theme.fg)),
+            Span::styled(arg.description, Style::default().fg(theme.muted)),
+        ]);
+        buf.set_line(popup.x, row, &line, popup.width);
+    }
+}
+
+fn render_model_suggestions(prefix: &str, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    use crate::views::model_picker::ModelEntry;
+
+    // Reuse the default model list
+    let models = super::model_picker::default_models();
+    let filtered: Vec<&ModelEntry> = models.iter()
+        .filter(|m| {
+            prefix.is_empty()
+                || m.display_name.to_lowercase().contains(prefix)
+                || m.model.to_lowercase().contains(prefix)
+                || m.provider.to_lowercase().contains(prefix)
+        })
+        .collect();
+
+    if filtered.is_empty() {
+        return;
+    }
+
+    let max_show = 8.min(filtered.len());
+    let height = (max_show + 1) as u16;
+    let width = 55u16.min(area.width.saturating_sub(4));
+    let y = area.y.saturating_sub(height + 1);
+    let x = area.x + 2;
+    let popup = Rect::new(x, y, width, height);
+
+    for row in popup.y..popup.y + popup.height {
+        for col in popup.x..popup.x + popup.width {
+            if col < buf.area().width && row < buf.area().height {
+                buf[(col, row)].set_char(' ').set_bg(theme.surface);
+            }
+        }
+    }
+
+    for (i, model) in filtered.iter().take(max_show).enumerate() {
+        let row = popup.y + i as u16;
+        if row >= buf.area().height {
+            break;
+        }
+        let line = Line::from(vec![
+            Span::styled(format!(" {:<24}", model.display_name), Style::default().fg(theme.fg)),
+            Span::styled(format!("({})", model.provider), Style::default().fg(theme.muted)),
+        ]);
+        buf.set_line(popup.x, row, &line, popup.width);
+    }
+
+    if filtered.len() > max_show {
+        let more_row = popup.y + max_show as u16;
+        if more_row < buf.area().height {
+            let more = Span::styled(
+                format!(" ... {} more", filtered.len() - max_show),
                 Style::default().fg(theme.muted),
             );
             buf.set_line(popup.x, more_row, &Line::from(more), popup.width);

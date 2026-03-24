@@ -126,6 +126,9 @@ impl CommandPalette {
         let dialog_area = Rect::new(x, y, width, height);
 
         frame.render_widget(Clear, dialog_area);
+        // Fill with themed dialog background
+        let bg_block = Block::default().style(Style::default().bg(theme.dialog_bg));
+        frame.render_widget(bg_block, dialog_area);
 
         let filtered = self.filtered_commands();
         let mut lines = Vec::new();
