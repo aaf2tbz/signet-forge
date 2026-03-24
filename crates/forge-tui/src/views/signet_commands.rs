@@ -225,7 +225,7 @@ impl Widget for &CommandPicker {
         Clear.render(popup, buf);
 
         let block = Block::default()
-            .title(" Signet Commands (Ctrl+H) ")
+            .title(" Signet Commands (Ctrl+G) ")
             .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray));
@@ -351,6 +351,6 @@ pub fn help_text() -> String {
     }) {
         text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
     }
-    text.push_str("\n  Press Ctrl+H to open the interactive command picker.\n");
+    text.push_str("\n  Press Ctrl+G to open the interactive command picker.\n");
     text
 }

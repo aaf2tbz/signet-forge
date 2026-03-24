@@ -134,6 +134,11 @@ pub struct App {
     config_rx: Option<mpsc::Receiver<ConfigEvent>>,
     /// Session persistence store
     session_store: Option<SessionStore>,
+    /// Speculative recall — fires while user is typing to pre-warm the cache
+    speculative_query: String,
+    speculative_handle: Option<tokio::task::JoinHandle<()>>,
+    last_keystroke: std::time::Instant,
+    recall_cache: forge_signet::recall_cache::RecallCache,
     /// Pipeline summary (extraction + embedding models)
     pipeline_info: String,
 }
@@ -158,9 +163,17 @@ impl App {
         let (event_tx, event_rx) = mpsc::channel::<AgentEvent>(256);
         let (permission_tx, permission_rx) = mpsc::channel::<PermissionRequest>(8);
 
+        // Shared recall cache — used by both agent hooks and TUI speculative recall
+        let recall_cache = forge_signet::recall_cache::RecallCache::new();
+
         // Set up session hooks if daemon is available
         let hooks = signet_client.as_ref().map(|client| {
-            SessionHooks::new(client.clone(), session_id, cwd.clone())
+            SessionHooks::with_cache(
+                client.clone(),
+                session_id,
+                cwd.clone(),
+                recall_cache.clone(),
+            )
         });
 
         let daemon_healthy = if let Some(client) = &signet_client {
@@ -271,6 +284,10 @@ impl App {
             config_rx,
             session_store,
             pipeline_info,
+            speculative_query: String::new(),
+            speculative_handle: None,
+            last_keystroke: std::time::Instant::now(),
+            recall_cache,
         }
     }
 
@@ -329,6 +346,52 @@ impl App {
                         }
                     }
                 }
+            }
+
+            // Speculative pre-recall — fire after 500ms of no typing
+            if !self.processing
+                && !self.input.is_empty()
+                && !self.input.starts_with('/')
+                && self.input != self.speculative_query
+                && self.last_keystroke.elapsed() > std::time::Duration::from_millis(500)
+                && self.signet_client.is_some()
+            {
+                let query = self.input.clone();
+                self.speculative_query = query.clone();
+
+                // Cancel any in-flight speculative task
+                if let Some(handle) = self.speculative_handle.take() {
+                    handle.abort();
+                }
+
+                let client = self.signet_client.as_ref().unwrap().clone();
+                let cache = self.recall_cache.clone();
+                self.speculative_handle = Some(tokio::spawn(async move {
+                    // Call daemon recall and store result in shared cache
+                    let body = serde_json::json!({
+                        "harness": "forge",
+                        "sessionId": "speculative",
+                        "userMessage": query,
+                        "runtimePath": "plugin",
+                    });
+                    if let Ok(result) = client
+                        .post("/api/hooks/user-prompt-submit", &body)
+                        .await
+                    {
+                        let injection = result
+                            .get("inject")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let count = result
+                            .get("memoryCount")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as usize;
+                        if !injection.is_empty() {
+                            cache.put(query, injection, count).await;
+                        }
+                    }
+                }));
             }
 
             if self.should_quit {
@@ -543,6 +606,9 @@ impl App {
                 self.input.clear();
                 self.cursor = 0;
 
+                // Always reset scroll to bottom when user submits
+                self.scroll_offset = 0;
+
                 // Check for slash commands before sending to LLM
                 if input.starts_with('/') {
                     self.handle_slash_command(&input).await;
@@ -561,8 +627,10 @@ impl App {
             Action::InsertChar(c) if !self.processing => {
                 self.input.insert(self.cursor, c);
                 self.cursor += 1;
+                self.last_keystroke = std::time::Instant::now();
             }
             Action::Backspace if !self.processing && self.cursor > 0 => {
+                self.last_keystroke = std::time::Instant::now();
                 self.cursor -= 1;
                 self.input.remove(self.cursor);
             }
@@ -618,14 +686,26 @@ impl App {
                     .as_ref()
                     .map(|c| c.base_url().to_string())
                     .unwrap_or_else(|| "http://localhost:3850".to_string());
-                let _ = tokio::process::Command::new("open")
+
+                // Use std::process (not tokio) to avoid async issues in sync context
+                let result = std::process::Command::new("open")
                     .arg(&url)
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
-                    .spawn();
-                self.entries.push(ChatEntry::Status(format!(
-                    "Dashboard opened: {url}"
-                )));
+                    .status();
+
+                match result {
+                    Ok(s) if s.success() => {
+                        self.entries.push(ChatEntry::Status(format!(
+                            "Dashboard opened: {url}"
+                        )));
+                    }
+                    _ => {
+                        self.entries.push(ChatEntry::Error(format!(
+                            "Failed to open dashboard. Visit: {url}"
+                        )));
+                    }
+                }
             }
             _ => {}
         }

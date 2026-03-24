@@ -35,7 +35,7 @@ pub enum Action {
     Dashboard,
     /// Clear screen
     ClearScreen,
-    /// Open Signet command picker
+    /// Open Signet command picker (Ctrl+G)
     SignetCommands,
     /// Insert newline in input
     NewLine,
@@ -70,8 +70,9 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::CONTROL, KeyCode::Char('o')) => Action::ModelPicker,
         (KeyModifiers::CONTROL, KeyCode::Char('k')) => Action::CommandPalette,
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => Action::ClearScreen,
-        (KeyModifiers::CONTROL, KeyCode::Char('h')) => Action::SignetCommands,
-        (KeyModifiers::NONE, KeyCode::F(2)) => Action::Dashboard,
+
+        (KeyModifiers::CONTROL, KeyCode::Char('g')) => Action::SignetCommands,
+        (KeyModifiers::CONTROL, KeyCode::Tab) => Action::Dashboard,
 
         // Character input
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => Action::InsertChar(c),

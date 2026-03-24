@@ -22,6 +22,8 @@ impl AnthropicProvider {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .connect_timeout(std::time::Duration::from_secs(10))
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
+            .pool_max_idle_per_host(4)
             .build()
             .unwrap_or_default();
         Self {
@@ -124,7 +126,14 @@ impl Provider for AnthropicProvider {
         });
 
         if let Some(system) = &opts.system_prompt {
-            body["system"] = json!(system);
+            // Use structured system prompt with cache_control for prompt caching.
+            // This caches the system prompt server-side, reducing TTFT on subsequent
+            // calls within a session (tools + base prompt stay the same).
+            body["system"] = json!([{
+                "type": "text",
+                "text": system,
+                "cache_control": { "type": "ephemeral" }
+            }]);
         }
 
         if let Some(temp) = opts.temperature {
@@ -211,6 +220,18 @@ impl Provider for AnthropicProvider {
 
     async fn available(&self) -> bool {
         !self.api_key.is_empty()
+    }
+
+    async fn preconnect(&self) {
+        // Warm the connection pool by sending a lightweight request.
+        // reqwest pools HTTP/2 connections, so subsequent requests to the
+        // same host reuse the existing TCP+TLS connection (~100-200ms saved).
+        let _ = self
+            .client
+            .head(ANTHROPIC_API_URL)
+            .header("x-api-key", &self.api_key)
+            .send()
+            .await;
     }
 }
 

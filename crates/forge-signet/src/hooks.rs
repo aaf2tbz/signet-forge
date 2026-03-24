@@ -1,4 +1,5 @@
 use crate::client::SignetClient;
+use crate::recall_cache::RecallCache;
 use forge_core::ForgeError;
 use serde::Serialize;
 use tracing::debug;
@@ -18,6 +19,8 @@ pub struct SessionHooks {
     client: SignetClient,
     session_id: String,
     project: Option<String>,
+    /// Cache for recent recall results — avoids redundant daemon calls
+    recall_cache: RecallCache,
 }
 
 /// Payload sent to session-start hook
@@ -88,7 +91,28 @@ impl SessionHooks {
             client,
             session_id,
             project,
+            recall_cache: RecallCache::new(),
         }
+    }
+
+    /// Create with a shared recall cache (for speculative pre-recall from TUI)
+    pub fn with_cache(
+        client: SignetClient,
+        session_id: String,
+        project: Option<String>,
+        cache: RecallCache,
+    ) -> Self {
+        Self {
+            client,
+            session_id,
+            project,
+            recall_cache: cache,
+        }
+    }
+
+    /// Get a clone of the recall cache for sharing with the TUI
+    pub fn recall_cache(&self) -> RecallCache {
+        self.recall_cache.clone()
     }
 
     /// Call session-start hook — returns (injection_text, memory_count).
@@ -137,7 +161,13 @@ impl SessionHooks {
     /// database using the user's message as the query, scored by the
     /// predictor sidecar and importance decay.
     pub async fn prompt_submit(&self, user_message: &str) -> Result<(String, usize), ForgeError> {
-        debug!("Calling user-prompt-submit hook");
+        // Check cache first — avoids daemon round-trip for repeated/similar queries
+        if let Some(cached) = self.recall_cache.get(user_message).await {
+            debug!("Recall cache hit for query ({}ms saved)", "~200-2000");
+            return Ok(cached);
+        }
+
+        debug!("Calling user-prompt-submit hook (cache miss)");
 
         let payload = PromptSubmitPayload {
             harness: HARNESS_NAME.to_string(),
@@ -166,13 +196,20 @@ impl SessionHooks {
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
+        let count = memory_count as usize;
+
         debug!(
             "Prompt submit: {} bytes inject, {} memories",
             injection.len(),
-            memory_count
+            count
         );
 
-        Ok((injection, memory_count as usize))
+        // Cache the result for future exact-match queries
+        self.recall_cache
+            .put(user_message.to_string(), injection.clone(), count)
+            .await;
+
+        Ok((injection, count))
     }
 
     /// Call pre-compaction hook — called before auto-compacting context.
@@ -219,6 +256,9 @@ impl SessionHooks {
     /// None of these models are the conversational model that Forge uses.
     /// Forge sends the transcript and the daemon handles everything else.
     pub async fn session_end(&self, transcript: &str) -> Result<(), ForgeError> {
+        // Clear recall cache — extraction will create new memories
+        self.recall_cache.clear().await;
+
         debug!(
             "Calling session-end hook for session {} ({} bytes transcript)",
             self.session_id,

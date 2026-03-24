@@ -69,6 +69,13 @@ pub trait Provider: Send + Sync {
 
     /// Check if the provider is available (API key set, endpoint reachable)
     async fn available(&self) -> bool;
+
+    /// Pre-warm the connection to reduce time-to-first-token.
+    /// Called in parallel with memory recall so the TCP+TLS handshake
+    /// overlaps with the daemon round-trip.
+    async fn preconnect(&self) {
+        // Default no-op — providers can override to warm their connection pool
+    }
 }
 
 /// Create a provider by name (API-based providers)

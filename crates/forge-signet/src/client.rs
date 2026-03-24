@@ -29,9 +29,16 @@ pub struct DaemonStatus {
 
 impl SignetClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        let client = Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
+            .pool_max_idle_per_host(4)
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
             base_url: base_url.into(),
-            client: Client::new(),
+            client,
         }
     }
 

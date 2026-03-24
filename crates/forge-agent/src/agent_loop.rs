@@ -1,7 +1,7 @@
 use crate::context::ContextManager;
 use crate::permissions::{PermissionManager, PermissionRequest, PermissionResponse};
 use crate::session::SharedSession;
-use forge_core::{Message, MessageContent, TokenUsage, ToolCall};
+use forge_core::{Message, MessageContent, ToolCall, ToolDefinition, TokenUsage};
 use forge_provider::{CompletionOpts, Provider, StreamEvent};
 use forge_signet::hooks::SessionHooks;
 use forge_tools;
@@ -48,6 +48,8 @@ pub struct AgentLoop {
     permissions: Arc<Mutex<PermissionManager>>,
     context_manager: ContextManager,
     system_prompt: String,
+    /// Cached tool definitions — computed once, reused every loop iteration
+    tool_definitions: Vec<ToolDefinition>,
 }
 
 impl AgentLoop {
@@ -60,6 +62,8 @@ impl AgentLoop {
         system_prompt: String,
     ) -> Self {
         let context_window = provider.context_window();
+        // Cache tool definitions once — no need to rebuild JSON schemas every call
+        let tool_definitions = forge_tools::all_definitions();
         Self {
             provider,
             hooks,
@@ -68,21 +72,39 @@ impl AgentLoop {
             permissions,
             context_manager: ContextManager::new(context_window),
             system_prompt,
+            tool_definitions,
         }
     }
 
     /// Process a user message through the full agentic loop
     pub async fn process_message(&self, session: &SharedSession, user_input: &str) {
-        // 1. Call user-prompt-submit hook for memory injection
+        // 1. Add user message to session FIRST (independent of recall)
+        {
+            let mut s = session.lock().await;
+            s.add_message(Message::user(user_input));
+        }
+
+        // 2. Run memory recall + provider preconnect in PARALLEL
         let mut memory_context = String::new();
         if let Some(hooks) = &self.hooks {
             let _ = self
                 .event_tx
                 .send(AgentEvent::Status("◇ Recalling memories...".to_string()))
                 .await;
-            match hooks.prompt_submit(user_input).await {
+
+            // Overlap: recall memories while warming the provider connection
+            let recall_future = hooks.prompt_submit(user_input);
+            let preconnect_future = self.provider.preconnect();
+
+            let (recall_result, _) = tokio::join!(recall_future, preconnect_future);
+
+            match recall_result {
                 Ok((injection, count)) if !injection.is_empty() => {
-                    debug!("Memory injection: {} bytes, {} memories", injection.len(), count);
+                    debug!(
+                        "Memory injection: {} bytes, {} memories",
+                        injection.len(),
+                        count
+                    );
                     let _ = self
                         .event_tx
                         .send(AgentEvent::MemoryCount(count))
@@ -94,12 +116,9 @@ impl AgentLoop {
                     debug!("Prompt hook failed (non-fatal): {e}");
                 }
             }
-        }
-
-        // 2. Add user message to session
-        {
-            let mut s = session.lock().await;
-            s.add_message(Message::user(user_input));
+        } else {
+            // No daemon — still preconnect to provider
+            self.provider.preconnect().await;
         }
 
         // Notify TUI that we're now waiting for the LLM
@@ -123,16 +142,18 @@ impl AgentLoop {
                 ..Default::default()
             };
 
-            let tools = forge_tools::all_definitions();
-
             // Get current messages snapshot
             let messages = {
                 let s = session.lock().await;
                 s.messages.clone()
             };
 
-            // 4. Call the provider
-            let stream = match self.provider.complete(&messages, &tools, &opts).await {
+            // 4. Call the provider (using cached tool definitions)
+            let stream = match self
+                .provider
+                .complete(&messages, &self.tool_definitions, &opts)
+                .await
+            {
                 Ok(s) => s,
                 Err(e) => {
                     error!("Provider error: {e}");
@@ -172,16 +193,17 @@ impl AgentLoop {
                         current_tool_input.push_str(&json);
                     }
                     StreamEvent::ToolUseEnd => {
-                        let input: serde_json::Value = match serde_json::from_str(&current_tool_input) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                warn!(
-                                    "Failed to parse tool input JSON for {}: {e}",
-                                    current_tool_name
-                                );
-                                serde_json::Value::Object(Default::default())
-                            }
-                        };
+                        let input: serde_json::Value =
+                            match serde_json::from_str(&current_tool_input) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to parse tool input JSON for {}: {e}",
+                                        current_tool_name
+                                    );
+                                    serde_json::Value::Object(Default::default())
+                                }
+                            };
                         tool_calls.push(ToolCall {
                             id: current_tool_id.clone(),
                             name: current_tool_name.clone(),
@@ -233,7 +255,6 @@ impl AgentLoop {
 
             // 7. If no tool calls, we're done — check compaction first
             if tool_calls.is_empty() {
-                // Check if context needs compaction
                 let estimated_tokens = {
                     let s = session.lock().await;
                     ContextManager::estimate_tokens(&s.messages)
@@ -258,7 +279,6 @@ impl AgentLoop {
             // 8. Execute tool calls with permission checks
             let mut tool_results_content = Vec::new();
             for tc in &tool_calls {
-                // Check permissions
                 let tool_impl = forge_tools::find_tool(&tc.name);
                 let permission_level = tool_impl
                     .as_ref()
@@ -271,7 +291,6 @@ impl AgentLoop {
                 };
 
                 if !approved {
-                    // Request permission from the TUI
                     let _ = self
                         .event_tx
                         .send(AgentEvent::ToolApproval(
@@ -291,19 +310,13 @@ impl AgentLoop {
                         })
                         .await;
 
-                    // Wait for user response
                     let response = match response_rx.await {
                         Ok(r) => r,
-                        Err(_) => {
-                            // Channel closed — treat as deny
-                            PermissionResponse::Deny
-                        }
+                        Err(_) => PermissionResponse::Deny,
                     };
 
                     match response {
-                        PermissionResponse::Allow => {
-                            // Proceed with execution
-                        }
+                        PermissionResponse::Allow => {}
                         PermissionResponse::AlwaysAllow => {
                             let mut perms = self.permissions.lock().await;
                             perms.approve_for_session(&tc.name);
@@ -374,23 +387,4 @@ impl AgentLoop {
             memory_context.clear();
         }
     }
-}
-
-/// Parse memory count from Signet's injection response.
-fn parse_memory_count(context: &str) -> usize {
-    // Try "results=N" from Signet recall header
-    for segment in context.split('|') {
-        let trimmed = segment.trim();
-        if let Some(rest) = trimmed.strip_prefix("results=") {
-            if let Ok(n) = rest.trim().parse::<usize>() {
-                return n;
-            }
-        }
-    }
-    // Count "- " prefixed memory entries
-    let entries = context.lines().filter(|l| l.starts_with("- ")).count();
-    if entries > 0 {
-        return entries;
-    }
-    if !context.trim().is_empty() { 1 } else { 0 }
 }
