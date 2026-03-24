@@ -94,6 +94,8 @@ pub struct App {
     model: String,
     provider_name: String,
     context_window: usize,
+    /// Active color theme
+    theme: crate::theme::Theme,
     /// CLI binary path (if using a CLI provider)
     cli_path: Option<String>,
     /// Current reasoning effort level (shared with agent loop)
@@ -155,6 +157,7 @@ impl App {
         signet_client: Option<SignetClient>,
         system_prompt: String,
         cli_path: Option<String>,
+        theme_name: &str,
     ) -> Self {
         let model = provider.model().to_string();
         let provider_name = provider.name().to_string();
@@ -273,6 +276,7 @@ impl App {
             model,
             provider_name,
             context_window,
+            theme: crate::theme::Theme::by_name(theme_name),
             cli_path,
             effort,
             memories_injected,
@@ -451,6 +455,13 @@ impl App {
             total_memories: self.total_memories,
             effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
+            status_bg: self.theme.status_bg,
+            status_fg: self.theme.status_fg,
+            accent: self.theme.accent,
+            muted: self.theme.muted,
+            success: self.theme.success,
+            error: self.theme.error,
+            warning: self.theme.warning,
         };
         status.render(chunks[0], frame.buffer_mut());
 
@@ -860,9 +871,18 @@ impl App {
                                 .push(ChatEntry::Status("Context compaction is automatic at 90% capacity.".to_string()));
                         }
                         "theme" => {
-                            self.entries.push(ChatEntry::Status(
-                                "Themes: signet-dark, signet-light, midnight, amber. Use --theme flag on launch.".to_string(),
-                            ));
+                            if args.is_empty() {
+                                self.entries.push(ChatEntry::Status(format!(
+                                    "Current theme: {}. Available: {}",
+                                    self.theme.name,
+                                    crate::theme::Theme::all_names().join(", ")
+                                )));
+                            } else {
+                                self.theme = crate::theme::Theme::by_name(args);
+                                self.entries.push(ChatEntry::Status(format!(
+                                    "Theme set to: {}", self.theme.name
+                                )));
+                            }
                         }
                         "effort" => {
                             if args.is_empty() {

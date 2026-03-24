@@ -8,10 +8,12 @@ pub struct Theme {
     pub status_bg: Color,
     /// Status bar text
     pub status_fg: Color,
-    /// Main background (terminal default)
+    /// Main background
     pub bg: Color,
     /// Primary text
     pub fg: Color,
+    /// Bright text (headings, emphasis)
+    pub fg_bright: Color,
     /// User message label
     pub user: Color,
     /// Assistant streaming cursor
@@ -34,6 +36,8 @@ pub struct Theme {
     pub border: Color,
     /// Dialog overlay background
     pub dialog_bg: Color,
+    /// Surface (raised panels, cards)
+    pub surface: Color,
     /// Selected item background
     pub selected_bg: Color,
     /// Selected item foreground
@@ -41,99 +45,143 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Signet Dark — the default theme. Industrial monochrome with cyan accents.
+    /// Signet Dark — industrial monochrome. Near-black with desaturated accents.
+    /// Tokens from globals.css: --color-bg: #08080a, --color-surface: #0e0e12
     pub fn signet_dark() -> Self {
         Self {
             name: "signet-dark",
-            status_bg: Color::Rgb(30, 30, 30),
-            status_fg: Color::White,
-            bg: Color::Reset,
-            fg: Color::White,
-            user: Color::Cyan,
-            assistant: Color::Green,
-            tool: Color::Magenta,
-            success: Color::Green,
-            error: Color::Red,
-            warning: Color::Yellow,
-            muted: Color::DarkGray,
-            accent: Color::Cyan,
-            code: Color::Green,
-            border: Color::DarkGray,
-            dialog_bg: Color::Rgb(20, 20, 20),
-            selected_bg: Color::Cyan,
-            selected_fg: Color::Black,
+            // --color-bg: #08080a → RGB(8, 8, 10)
+            bg: Color::Rgb(8, 8, 10),
+            // --color-surface: #0e0e12
+            surface: Color::Rgb(14, 14, 18),
+            // --color-surface-raised: #151519
+            status_bg: Color::Rgb(21, 21, 25),
+            // --color-text: #d4d4d8
+            fg: Color::Rgb(212, 212, 216),
+            status_fg: Color::Rgb(212, 212, 216),
+            // --color-text-bright: #f0f0f2
+            fg_bright: Color::Rgb(240, 240, 242),
+            // --color-text-muted: #3e3e46
+            muted: Color::Rgb(62, 62, 70),
+            // --color-accent: #8a8a96
+            accent: Color::Rgb(138, 138, 150),
+            // User messages — slightly brighter than accent
+            user: Color::Rgb(192, 192, 200),
+            // Assistant streaming cursor — accent-hover: #c0c0c8
+            assistant: Color::Rgb(192, 192, 200),
+            // Tool brackets — accent
+            tool: Color::Rgb(138, 138, 150),
+            // --color-success: #4a7a5e
+            success: Color::Rgb(74, 122, 94),
+            // --color-danger: #8a4a48
+            error: Color::Rgb(138, 74, 72),
+            // Warning — between accent and danger
+            warning: Color::Rgb(180, 160, 80),
+            // Code blocks — bright text
+            code: Color::Rgb(240, 240, 242),
+            // --color-border: rgba(255,255,255,0.06) ≈ RGB(15,15,15) on #08080a
+            border: Color::Rgb(30, 30, 34),
+            // Dialog background — surface
+            dialog_bg: Color::Rgb(14, 14, 18),
+            // Selected — accent-hover on accent bg
+            selected_bg: Color::Rgb(138, 138, 150),
+            selected_fg: Color::Rgb(8, 8, 10),
         }
     }
 
-    /// Signet Light — for light terminal backgrounds.
+    /// Signet Light — warm beige. Never pure white.
+    /// Tokens from globals.css: --color-bg: #e4dfd8, --color-surface: #dbd5cd
     pub fn signet_light() -> Self {
         Self {
             name: "signet-light",
-            status_bg: Color::Rgb(230, 230, 230),
-            status_fg: Color::Black,
-            bg: Color::Reset,
-            fg: Color::Black,
-            user: Color::Blue,
-            assistant: Color::Rgb(0, 120, 0),
-            tool: Color::Rgb(140, 0, 140),
-            success: Color::Rgb(0, 120, 0),
-            error: Color::Red,
-            warning: Color::Rgb(180, 120, 0),
-            muted: Color::Gray,
-            accent: Color::Blue,
-            code: Color::Rgb(0, 120, 0),
-            border: Color::Gray,
-            dialog_bg: Color::Rgb(240, 240, 240),
-            selected_bg: Color::Blue,
-            selected_fg: Color::White,
+            // --color-bg: #e4dfd8 → RGB(228, 223, 216)
+            bg: Color::Rgb(228, 223, 216),
+            // --color-surface: #dbd5cd
+            surface: Color::Rgb(219, 213, 205),
+            // --color-surface-raised: #d1cbc2
+            status_bg: Color::Rgb(209, 203, 194),
+            // --color-text: #2a2a2e
+            fg: Color::Rgb(42, 42, 46),
+            status_fg: Color::Rgb(42, 42, 46),
+            // --color-text-bright: #0a0a0c
+            fg_bright: Color::Rgb(10, 10, 12),
+            // --color-text-muted: #7a756e
+            muted: Color::Rgb(122, 117, 110),
+            // --color-accent: #6a6660
+            accent: Color::Rgb(106, 102, 96),
+            // User messages — near-black for readability
+            user: Color::Rgb(42, 42, 46),
+            // Assistant — accent-hover: #3a3832
+            assistant: Color::Rgb(58, 56, 50),
+            // Tool brackets — accent
+            tool: Color::Rgb(106, 102, 96),
+            // --color-success: #4a7a5e (same both modes)
+            success: Color::Rgb(74, 122, 94),
+            // --color-danger: #8a4a48 (same both modes)
+            error: Color::Rgb(138, 74, 72),
+            // Warning
+            warning: Color::Rgb(160, 120, 50),
+            // Code — bright text (near-black)
+            code: Color::Rgb(10, 10, 12),
+            // --color-border: rgba(0,0,0,0.06) ≈ RGB(214,209,203) on #e4dfd8
+            border: Color::Rgb(190, 185, 178),
+            // Dialog — surface
+            dialog_bg: Color::Rgb(219, 213, 205),
+            // Selected
+            selected_bg: Color::Rgb(106, 102, 96),
+            selected_fg: Color::Rgb(228, 223, 216),
         }
     }
 
-    /// Midnight — deep blue-black.
+    /// Midnight — deep blue-black with cool accents.
     pub fn midnight() -> Self {
         Self {
             name: "midnight",
+            bg: Color::Rgb(10, 12, 22),
+            surface: Color::Rgb(18, 22, 38),
             status_bg: Color::Rgb(15, 20, 35),
-            status_fg: Color::Rgb(180, 190, 220),
-            bg: Color::Reset,
             fg: Color::Rgb(200, 210, 230),
+            status_fg: Color::Rgb(180, 190, 220),
+            fg_bright: Color::Rgb(230, 235, 250),
+            muted: Color::Rgb(80, 90, 110),
+            accent: Color::Rgb(100, 150, 255),
             user: Color::Rgb(100, 150, 255),
             assistant: Color::Rgb(80, 200, 120),
             tool: Color::Rgb(180, 130, 255),
             success: Color::Rgb(80, 200, 120),
             error: Color::Rgb(255, 100, 100),
             warning: Color::Rgb(255, 200, 80),
-            muted: Color::Rgb(80, 90, 110),
-            accent: Color::Rgb(100, 150, 255),
             code: Color::Rgb(80, 200, 120),
             border: Color::Rgb(50, 60, 80),
             dialog_bg: Color::Rgb(20, 25, 45),
             selected_bg: Color::Rgb(100, 150, 255),
-            selected_fg: Color::Black,
+            selected_fg: Color::Rgb(10, 12, 22),
         }
     }
 
-    /// Amber — warm retro terminal aesthetic.
+    /// Amber — warm retro terminal.
     pub fn amber() -> Self {
         Self {
             name: "amber",
+            bg: Color::Rgb(15, 12, 5),
+            surface: Color::Rgb(25, 20, 10),
             status_bg: Color::Rgb(30, 25, 15),
-            status_fg: Color::Rgb(255, 180, 50),
-            bg: Color::Reset,
             fg: Color::Rgb(255, 200, 100),
+            status_fg: Color::Rgb(255, 180, 50),
+            fg_bright: Color::Rgb(255, 230, 160),
+            muted: Color::Rgb(120, 100, 60),
+            accent: Color::Rgb(255, 180, 50),
             user: Color::Rgb(255, 180, 50),
             assistant: Color::Rgb(255, 220, 130),
             tool: Color::Rgb(200, 150, 50),
             success: Color::Rgb(200, 255, 100),
             error: Color::Rgb(255, 80, 50),
             warning: Color::Rgb(255, 200, 50),
-            muted: Color::Rgb(120, 100, 60),
-            accent: Color::Rgb(255, 180, 50),
             code: Color::Rgb(255, 220, 130),
             border: Color::Rgb(80, 65, 30),
             dialog_bg: Color::Rgb(25, 20, 10),
             selected_bg: Color::Rgb(255, 180, 50),
-            selected_fg: Color::Black,
+            selected_fg: Color::Rgb(15, 12, 5),
         }
     }
 

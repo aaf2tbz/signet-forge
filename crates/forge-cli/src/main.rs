@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
 
     // Interactive TUI mode
     let mut terminal = ratatui::init();
-    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path).await;
+    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path, &cli.theme).await;
 
     if cli.resume {
         app.resume_last_session().await;

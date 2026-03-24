@@ -17,6 +17,13 @@ pub struct StatusBar<'a> {
     pub total_memories: usize,
     pub effort: &'a str,
     pub daemon_healthy: bool,
+    pub status_bg: Color,
+    pub status_fg: Color,
+    pub accent: Color,
+    pub muted: Color,
+    pub success: Color,
+    pub error: Color,
+    pub warning: Color,
 }
 
 impl<'a> Widget for StatusBar<'a> {
@@ -27,17 +34,20 @@ impl<'a> Widget for StatusBar<'a> {
         let context_display = format_tokens(self.context_window);
 
         let health_indicator = if self.daemon_healthy {
-            Span::styled("●", Style::default().fg(Color::Green))
+            Span::styled("●", Style::default().fg(self.success))
         } else {
-            Span::styled("●", Style::default().fg(Color::Red))
+            Span::styled("●", Style::default().fg(self.error))
         };
 
         let info_line = Line::from(vec![
-            Span::styled(" [Forge] ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("{} ({}) ", self.model, self.provider)),
+            Span::styled(" [Forge] ", Style::default().fg(self.accent)),
+            Span::styled(
+                format!("{} ({}) ", self.model, self.provider),
+                Style::default().fg(self.status_fg),
+            ),
             Span::styled(
                 format!("{token_display}/{context_display} "),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.muted),
             ),
             health_indicator,
             Span::raw(" "),
@@ -45,9 +55,9 @@ impl<'a> Widget for StatusBar<'a> {
                 Span::styled(
                     format!("[{}] ", self.effort),
                     Style::default().fg(if self.effort == "high" {
-                        Color::Yellow
+                        self.warning
                     } else {
-                        Color::DarkGray
+                        self.muted
                     }),
                 )
             } else {
@@ -68,31 +78,31 @@ impl<'a> Widget for StatusBar<'a> {
             // Fill background
             for x in area.x..area.x + area.width {
                 buf[(x, area.y)]
-                    .set_bg(Color::Rgb(30, 30, 30));
+                    .set_bg(self.status_bg);
             }
         }
 
         // Bottom line: key bindings
         if area.height >= 2 {
             let keys_line = Line::from(vec![
-                Span::styled(" ^O", Style::default().fg(Color::Yellow)),
+                Span::styled(" ^O", Style::default().fg(self.accent)),
                 Span::raw(" model "),
-                Span::styled("^K", Style::default().fg(Color::Yellow)),
+                Span::styled("^K", Style::default().fg(self.accent)),
                 Span::raw(" cmd "),
-                Span::styled("^D", Style::default().fg(Color::Yellow)),
+                Span::styled("^D", Style::default().fg(self.accent)),
                 Span::raw(" dashboard "),
-                Span::styled("^G", Style::default().fg(Color::Yellow)),
+                Span::styled("^G", Style::default().fg(self.accent)),
                 Span::raw(" signet "),
-                Span::styled("^C", Style::default().fg(Color::Yellow)),
+                Span::styled("^C", Style::default().fg(self.accent)),
                 Span::raw(" cancel "),
-                Span::styled("^Q", Style::default().fg(Color::Yellow)),
+                Span::styled("^Q", Style::default().fg(self.accent)),
                 Span::raw(" quit"),
             ]);
 
             buf.set_line(area.x, area.y + 1, &keys_line, area.width);
             for x in area.x..area.x + area.width {
                 buf[(x, area.y + 1)]
-                    .set_bg(Color::Rgb(30, 30, 30));
+                    .set_bg(self.status_bg);
             }
         }
     }
