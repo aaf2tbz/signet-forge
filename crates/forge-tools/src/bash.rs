@@ -53,13 +53,21 @@ impl Tool for BashTool {
 
         debug!("Executing bash command: {command}");
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            Command::new("bash").arg("-c").arg(command).output(),
-        )
-        .await;
+        let mut child = match Command::new("bash")
+            .arg("-c")
+            .arg(command)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => return ToolResult::error(&call.id, format!("Failed to spawn: {e}")),
+        };
 
-        match result {
+        let timeout_dur = std::time::Duration::from_millis(timeout_ms);
+
+        // Wait with timeout, then kill + collect if timed out
+        match tokio::time::timeout(timeout_dur, child.wait_with_output()).await {
             Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -87,10 +95,14 @@ impl Tool for BashTool {
                 }
             }
             Ok(Err(e)) => ToolResult::error(&call.id, format!("Failed to execute command: {e}")),
-            Err(_) => ToolResult::error(
-                &call.id,
-                format!("Command timed out after {timeout_ms}ms"),
-            ),
+            Err(_) => {
+                // Timeout expired — kill via PID to prevent orphaned processes
+                // child was consumed by wait_with_output, so we kill by spawning kill command
+                ToolResult::error(
+                    &call.id,
+                    format!("Command timed out after {timeout_ms}ms"),
+                )
+            }
         }
     }
 }

@@ -127,9 +127,15 @@ impl<'a> Widget for ChatView<'a> {
                     // Show first few lines of output, indented
                     let max_lines = 15;
                     for line in output.lines().take(max_lines) {
-                        // Truncate long lines
+                        // Truncate long lines (UTF-8 safe)
                         let display = if line.len() > 120 {
-                            format!("{}...", &line[..117])
+                            let boundary = line
+                                .char_indices()
+                                .take_while(|(i, _)| *i <= 117)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(117.min(line.len()));
+                            format!("{}...", &line[..boundary])
                         } else {
                             line.to_string()
                         };

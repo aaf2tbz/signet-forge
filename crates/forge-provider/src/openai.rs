@@ -27,13 +27,18 @@ impl OpenAIProvider {
         base_url: impl Into<String>,
         context_window: usize,
     ) -> Self {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default();
         Self {
             provider_name: provider_name.into(),
             model: model.into(),
             api_key: api_key.into(),
             base_url: base_url.into(),
             context_window,
-            client: Client::new(),
+            client,
             extra_headers: Vec::new(),
         }
     }

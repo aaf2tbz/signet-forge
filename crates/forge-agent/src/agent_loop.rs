@@ -156,8 +156,16 @@ impl AgentLoop {
                         current_tool_input.push_str(&json);
                     }
                     StreamEvent::ToolUseEnd => {
-                        let input: serde_json::Value =
-                            serde_json::from_str(&current_tool_input).unwrap_or_default();
+                        let input: serde_json::Value = match serde_json::from_str(&current_tool_input) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to parse tool input JSON for {}: {e}",
+                                    current_tool_name
+                                );
+                                serde_json::Value::Object(Default::default())
+                            }
+                        };
                         tool_calls.push(ToolCall {
                             id: current_tool_id.clone(),
                             name: current_tool_name.clone(),

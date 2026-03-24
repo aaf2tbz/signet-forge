@@ -774,6 +774,13 @@ impl App {
         match event {
             AgentEvent::TextDelta(text) => {
                 self.streaming_text.push_str(&text);
+                // Cap streaming buffer at 512KB to prevent OOM on very long responses
+                if self.streaming_text.len() > 512 * 1024 {
+                    // Flush to entries and continue
+                    self.entries
+                        .push(ChatEntry::AssistantText(self.streaming_text.clone()));
+                    self.streaming_text.clear();
+                }
                 self.scroll_offset = 0;
             }
             AgentEvent::ToolStart { name, .. } => {

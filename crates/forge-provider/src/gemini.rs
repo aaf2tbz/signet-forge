@@ -17,10 +17,15 @@ pub struct GeminiProvider {
 
 impl GeminiProvider {
     pub fn new(model: String, api_key: String) -> Self {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default();
         Self {
             model,
             api_key,
-            client: Client::new(),
+            client,
         }
     }
 
@@ -177,7 +182,7 @@ impl Provider for GeminiProvider {
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
                 while let Some(data) = extract_sse_data(&mut buffer) {
-                    if let Some(event) = parse_gemini_chunk(&data) {
+                    for event in parse_gemini_chunk(&data) {
                         let is_done = matches!(event, StreamEvent::Done);
                         if tx.send(event).await.is_err() {
                             return;
@@ -213,39 +218,55 @@ fn extract_sse_data(buffer: &mut String) -> Option<String> {
     None
 }
 
-fn parse_gemini_chunk(data: &str) -> Option<StreamEvent> {
+/// Gemini sends complete function calls in one chunk (not streamed like Anthropic).
+/// We need to emit ToolUseStart + ToolUseInput + ToolUseEnd as separate events.
+fn parse_gemini_chunk(data: &str) -> Vec<StreamEvent> {
     let chunk: Value = match serde_json::from_str(data) {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to parse Gemini chunk: {e}");
-            return None;
+            return vec![];
         }
     };
 
+    let mut events = Vec::new();
+
     // Check for candidates
-    let candidates = chunk.get("candidates")?.as_array()?;
-    let candidate = candidates.first()?;
-    let content = candidate.get("content")?;
-    let parts = content.get("parts")?.as_array()?;
+    if let Some(candidates) = chunk.get("candidates").and_then(|c| c.as_array()) {
+        if let Some(candidate) = candidates.first() {
+            if let Some(parts) = candidate
+                .get("content")
+                .and_then(|c| c.get("parts"))
+                .and_then(|p| p.as_array())
+            {
+                for part in parts {
+                    // Text content
+                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                        events.push(StreamEvent::TextDelta(text.to_string()));
+                    }
 
-    for part in parts {
-        // Text content
-        if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-            return Some(StreamEvent::TextDelta(text.to_string()));
-        }
+                    // Function call — emit all three events
+                    if let Some(fc) = part.get("functionCall") {
+                        let name = fc
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("unknown");
+                        let args = fc.get("args").cloned().unwrap_or(json!({}));
+                        let args_str = args.to_string();
 
-        // Function call
-        if let Some(fc) = part.get("functionCall") {
-            let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
-            let args = fc.get("args").cloned().unwrap_or(json!({}));
-            return Some(StreamEvent::ToolUseStart {
-                id: format!("gemini-{}", uuid::Uuid::new_v4()),
-                name: name.to_string(),
-            });
+                        events.push(StreamEvent::ToolUseStart {
+                            id: format!("gemini-{}", uuid::Uuid::new_v4()),
+                            name: name.to_string(),
+                        });
+                        events.push(StreamEvent::ToolUseInput(args_str));
+                        events.push(StreamEvent::ToolUseEnd);
+                    }
+                }
+            }
         }
     }
 
-    // Check usage
+    // Check usage metadata
     if let Some(metadata) = chunk.get("usageMetadata") {
         let input = metadata
             .get("promptTokenCount")
@@ -256,7 +277,7 @@ fn parse_gemini_chunk(data: &str) -> Option<StreamEvent> {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
         if input > 0 || output > 0 {
-            return Some(StreamEvent::Usage(TokenUsage {
+            events.push(StreamEvent::Usage(TokenUsage {
                 input_tokens: input,
                 output_tokens: output,
                 ..Default::default()
@@ -264,5 +285,5 @@ fn parse_gemini_chunk(data: &str) -> Option<StreamEvent> {
         }
     }
 
-    None
+    events
 }
