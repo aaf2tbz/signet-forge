@@ -96,12 +96,12 @@ Full-featured AI coding terminal. MCP servers connected, skills invokable via sl
 **Goal:** Production-ready single binary with CI/CD.
 
 ### What gets built
-- [ ] Cross-platform builds — macOS universal (ARM64 + x86_64), Linux x64/ARM64, Windows x64
-- [ ] GitHub Actions CI/CD — build on push/PR, binary releases on git tag
-- [ ] Theme system — signet-dark (default), signet-light, community themes
+- [x] Cross-platform builds — macOS ARM64/x64, Linux x64 (GitHub Actions matrix)
+- [x] GitHub Actions CI/CD — build.yml (check + clippy + build on push/PR), release.yml (binary releases on tag)
+- [x] Theme system — 4 themes (signet-dark, signet-light, midnight, amber), --theme flag
 - [ ] Keyboard shortcut customization (keybindings config file)
 - [ ] Error recovery — daemon connection lost (reconnect), API timeout (retry), graceful degradation
-- [ ] Non-interactive mode (`forge -p "prompt"`) for scripting
+- [x] Non-interactive mode (`forge -p "prompt"`) — streams response to stdout, exits
 - [ ] Session import from Claude Code (parse `.claude/sessions/`)
 - [ ] `cargo install signet-forge` support
 - [ ] Installer scripts for quick setup

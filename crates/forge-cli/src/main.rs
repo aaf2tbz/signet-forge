@@ -15,8 +15,8 @@ struct Cli {
     #[arg(short, long)]
     model: Option<String>,
 
-    /// Provider (anthropic, openai, gemini, groq, ollama)
-    #[arg(short, long)]
+    /// Provider (anthropic, openai, gemini, groq, ollama, openrouter, xai)
+    #[arg(long)]
     provider: Option<String>,
 
     /// Signet daemon URL
@@ -30,11 +30,21 @@ struct Cli {
     /// Resume the last session
     #[arg(long)]
     resume: bool,
+
+    /// Non-interactive mode: send a single prompt and print the response
+    #[arg(short = 'p', long = "prompt")]
+    prompt: Option<String>,
+
+    /// Color theme (signet-dark, signet-light, midnight, amber)
+    #[arg(long, default_value = "signet-dark")]
+    theme: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
+    let cli = Cli::parse();
+
+    // Initialize logging — stderr so it doesn't interfere with -p output
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -44,13 +54,9 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let cli = Cli::parse();
-
     // Load Signet agent config
     let _agent_config = load_agent_config().unwrap_or_default();
-    let provider_name = cli
-        .provider
-        .unwrap_or_else(|| "anthropic".to_string());
+    let provider_name = cli.provider.unwrap_or_else(|| "anthropic".to_string());
     let model = cli
         .model
         .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
@@ -76,32 +82,7 @@ async fn main() -> Result<()> {
     };
 
     // Resolve API key
-    let api_key = if let Some(client) = &signet_client {
-        match resolve_api_key(client, &provider_name).await {
-            Ok(key) => key,
-            Err(e) => {
-                // Fall back to environment variable
-                warn!("Signet secret resolution failed: {e}");
-                std::env::var(format!(
-                    "{}_API_KEY",
-                    provider_name.to_uppercase()
-                ))
-                .map_err(|_| anyhow::anyhow!(
-                    "No API key found for {provider_name}. Set {}_API_KEY or add to Signet secrets.",
-                    provider_name.to_uppercase()
-                ))?
-            }
-        }
-    } else {
-        std::env::var(format!(
-            "{}_API_KEY",
-            provider_name.to_uppercase()
-        ))
-        .map_err(|_| anyhow::anyhow!(
-            "No API key found for {provider_name}. Set {}_API_KEY env var.",
-            provider_name.to_uppercase()
-        ))?
-    };
+    let api_key = resolve_key(&signet_client, &provider_name).await?;
 
     // Create provider
     let provider: Arc<dyn forge_provider::Provider> =
@@ -110,25 +91,96 @@ async fn main() -> Result<()> {
     // Build system prompt from Signet identity files
     let identity_prompt = build_identity_prompt();
     let system_prompt = if identity_prompt.is_empty() {
-        "You are Forge, a helpful AI coding assistant running in a terminal. Help the user with software engineering tasks.".to_string()
+        "You are Forge, a helpful AI coding assistant running in a terminal. \
+         Help the user with software engineering tasks."
+            .to_string()
     } else {
         identity_prompt
     };
 
-    // Initialize TUI
+    // Non-interactive mode: send prompt, print response, exit
+    if let Some(prompt) = cli.prompt {
+        return run_non_interactive(provider, signet_client, system_prompt, &prompt).await;
+    }
+
+    // Interactive TUI mode
     let mut terminal = ratatui::init();
     let mut app = App::new(provider, signet_client, system_prompt).await;
 
-    // Resume last session if requested
     if cli.resume {
         app.resume_last_session().await;
     }
 
-    // Run the app
     let result = app.run(&mut terminal).await;
 
-    // Restore terminal
     ratatui::restore();
 
     result
+}
+
+/// Non-interactive mode: single prompt → streamed response → exit
+async fn run_non_interactive(
+    provider: Arc<dyn forge_provider::Provider>,
+    _signet_client: Option<SignetClient>,
+    system_prompt: String,
+    prompt: &str,
+) -> Result<()> {
+    use forge_core::Message;
+    use forge_provider::{CompletionOpts, StreamEvent};
+    use forge_tools;
+    use futures::StreamExt;
+
+    let messages = vec![Message::user(prompt)];
+    let tools = forge_tools::all_definitions();
+
+    let opts = CompletionOpts {
+        system_prompt: Some(system_prompt),
+        max_tokens: Some(8192),
+        ..Default::default()
+    };
+
+    let stream = provider.complete(&messages, &tools, &opts).await?;
+    let mut stream = std::pin::pin!(stream);
+
+    while let Some(event) = stream.next().await {
+        match event {
+            StreamEvent::TextDelta(text) => {
+                print!("{text}");
+            }
+            StreamEvent::Error(e) => {
+                eprintln!("\nError: {e}");
+                std::process::exit(1);
+            }
+            StreamEvent::Done => break,
+            _ => {}
+        }
+    }
+
+    println!();
+    Ok(())
+}
+
+async fn resolve_key(
+    signet_client: &Option<SignetClient>,
+    provider_name: &str,
+) -> Result<String> {
+    if provider_name == "ollama" {
+        return Ok("ollama".to_string());
+    }
+
+    if let Some(client) = signet_client {
+        match resolve_api_key(client, provider_name).await {
+            Ok(key) => return Ok(key),
+            Err(e) => {
+                warn!("Signet secret resolution failed: {e}");
+            }
+        }
+    }
+
+    let var_name = format!("{}_API_KEY", provider_name.to_uppercase());
+    std::env::var(&var_name).map_err(|_| {
+        anyhow::anyhow!(
+            "No API key for {provider_name}. Set {var_name} or add to Signet secrets."
+        )
+    })
 }
