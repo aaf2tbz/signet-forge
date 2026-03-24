@@ -212,7 +212,9 @@ impl<'a> Widget for ChatView<'a> {
             }
         }
 
-        // Calculate wrapped line count — each Line may span multiple visual rows
+        // Calculate wrapped line count — each Line may span multiple visual rows.
+        // Use Unicode display width (not byte count) so emoji and CJK are correct.
+        use unicode_width::UnicodeWidthStr;
         let width = area.width as usize;
         let total_lines: u16 = if width == 0 {
             lines.len() as u16
@@ -220,7 +222,7 @@ impl<'a> Widget for ChatView<'a> {
             lines
                 .iter()
                 .map(|line| {
-                    let content_width: usize = line.spans.iter().map(|s| s.content.len()).sum();
+                    let content_width: usize = line.spans.iter().map(|s| s.content.width()).sum();
                     1u16.max(content_width.div_ceil(width) as u16)
                 })
                 .sum()

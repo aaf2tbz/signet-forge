@@ -580,8 +580,9 @@ impl App {
         let input_lines = if input_width == 0 || self.input.is_empty() {
             1
         } else {
-            let chars: usize = self.input.chars().count();
-            1u16.max(chars.div_ceil(input_width) as u16)
+            use unicode_width::UnicodeWidthStr;
+            let display_width: usize = self.input.width();
+            1u16.max(display_width.div_ceil(input_width) as u16)
         };
         let max_input = (area.height / 3).max(3);
         let input_height = (input_lines + 2).min(max_input); // +2 for border + padding
