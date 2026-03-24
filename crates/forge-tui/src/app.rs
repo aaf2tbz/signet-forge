@@ -2,6 +2,7 @@ use crate::input::Action;
 use crate::keybinds::KeyBindConfig;
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
 use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPalette};
+use crate::views::dashboard_nav::DashboardNav;
 use crate::views::model_picker::ModelPicker;
 use crate::views::signet_commands::{self, CommandPicker};
 use crate::widgets::status_bar::StatusBar;
@@ -16,7 +17,7 @@ use forge_signet::secrets::resolve_api_key;
 use forge_signet::{ConfigEvent, ConfigWatcher, SignetClient};
 use ratatui::{
     layout::{Constraint, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
     DefaultTerminal, Frame,
@@ -121,8 +122,10 @@ pub struct App {
     model_picker: Option<ModelPicker>,
     /// Command palette overlay
     command_palette: Option<CommandPalette>,
-    /// Signet command picker (Ctrl+H)
+    /// Signet command picker (Ctrl+G)
     command_picker: Option<CommandPicker>,
+    /// Dashboard navigator (Ctrl+Tab)
+    dashboard_nav: Option<DashboardNav>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
@@ -290,6 +293,7 @@ impl App {
             model_picker: None,
             command_palette: None,
             command_picker: None,
+            dashboard_nav: None,
             skills,
             signet_client,
             permissions,
@@ -489,24 +493,25 @@ impl App {
             streaming_text: &self.streaming_text,
             scroll_offset: self.scroll_offset,
             activity_line,
+            theme: &self.theme,
         };
         chat.render(chunks[1], frame.buffer_mut());
 
-        // Input area
+        // Input area — themed
         let input_style = if self.processing {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(self.theme.muted)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(self.theme.fg)
         };
 
         let input_block = Block::default()
             .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_style(Style::default().fg(self.theme.border));
 
         let input_text = if self.input.is_empty() && !self.processing {
             Paragraph::new(Span::styled(
                 " Type a message...",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme.muted),
             ))
         } else {
             Paragraph::new(Span::styled(format!(" > {}", &self.input), input_style))
@@ -517,7 +522,7 @@ impl App {
 
         // Slash command autocomplete dropdown
         if !self.processing && self.input.starts_with('/') && self.input.len() < 30 {
-            signet_commands::render_autocomplete(&self.input, chunks[2], frame.buffer_mut());
+            signet_commands::render_autocomplete(&self.input, chunks[2], frame.buffer_mut(), &self.theme);
         }
 
         // Position cursor
@@ -532,18 +537,24 @@ impl App {
 
         // Model picker overlay
         if let Some(picker) = &self.model_picker {
-            picker.draw(frame);
+            picker.draw(frame, &self.theme);
         }
 
         // Command palette overlay
         if let Some(palette) = &self.command_palette {
-            palette.draw(frame);
+            palette.draw(frame, &self.theme);
         }
 
-        // Signet command picker overlay (Ctrl+H)
+        // Signet command picker overlay (Ctrl+G)
         if let Some(picker) = &self.command_picker {
             let area = frame.area();
-            picker.render(area, frame.buffer_mut());
+            picker.render_themed(area, frame.buffer_mut(), &self.theme);
+        }
+
+        // Dashboard navigator overlay (Ctrl+Tab)
+        if let Some(nav) = &self.dashboard_nav {
+            let area = frame.area();
+            nav.render_themed(area, frame.buffer_mut(), &self.theme);
         }
     }
 
@@ -567,14 +578,16 @@ impl App {
 
         let options = ["[Y] Allow", "[A] Always Allow", "[N] Deny"];
 
+        let t = &self.theme;
+
         let mut lines = vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  Tool: ", Style::default().fg(Color::Yellow)),
+                Span::styled("  Tool: ", Style::default().fg(t.warning)),
                 Span::styled(
                     &dialog.tool_name,
                     Style::default()
-                        .fg(Color::White)
+                        .fg(t.fg_bright)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -584,39 +597,46 @@ impl App {
         for pl in &preview_lines {
             lines.push(Line::from(Span::styled(
                 format!("  {pl}"),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(t.muted),
             )));
         }
 
         lines.push(Line::from(""));
 
-        let mut option_spans = vec![Span::raw("  ")];
+        let mut option_spans = vec![Span::styled("  ", Style::default().fg(t.fg))];
         for (i, opt) in options.iter().enumerate() {
             let style = if i == dialog.selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
+                    .fg(t.selected_fg)
+                    .bg(t.selected_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(t.fg)
             };
             option_spans.push(Span::styled(*opt, style));
             if i < options.len() - 1 {
-                option_spans.push(Span::raw("  "));
+                option_spans.push(Span::styled("  ", Style::default().fg(t.fg)));
             }
         }
         lines.push(Line::from(option_spans));
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow))
-            .title(" Allow tool execution? ");
+            .border_style(Style::default().fg(t.warning))
+            .title(" Allow tool execution? ")
+            .title_style(Style::default().fg(t.warning).add_modifier(Modifier::BOLD));
 
         let paragraph = Paragraph::new(lines).block(block);
         frame.render_widget(paragraph, dialog_area);
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If dashboard navigator is open, handle nav keys
+        if self.dashboard_nav.is_some() {
+            self.handle_dashboard_nav_key(key).await;
+            return;
+        }
+
         // If Signet command picker is open, handle picker keys
         if self.command_picker.is_some() {
             self.handle_command_picker_key(key).await;
@@ -651,6 +671,7 @@ impl App {
                 "command_palette" => Action::CommandPalette,
                 "signet_commands" => Action::SignetCommands,
                 "dashboard" => Action::Dashboard,
+                "dashboard_nav" => Action::DashboardNav,
                 "clear_screen" => Action::ClearScreen,
                 "scroll_up" => Action::ScrollUp,
                 "scroll_down" => Action::ScrollDown,
@@ -767,6 +788,9 @@ impl App {
             Action::SignetCommands if !self.processing => {
                 self.command_picker = Some(CommandPicker::new());
             }
+            Action::DashboardNav if !self.processing => {
+                self.dashboard_nav = Some(DashboardNav::new());
+            }
             Action::Dashboard => {
                 // Open Signet dashboard in default browser
                 let url = self
@@ -792,6 +816,60 @@ impl App {
                         self.entries.push(ChatEntry::Error(format!(
                             "Failed to open dashboard. Visit: {url}"
                         )));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_dashboard_nav_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Esc => {
+                self.dashboard_nav = None;
+            }
+            KeyCode::Up => {
+                if let Some(nav) = &mut self.dashboard_nav {
+                    nav.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(nav) = &mut self.dashboard_nav {
+                    nav.move_down();
+                }
+            }
+            KeyCode::Enter => {
+                let url = self.dashboard_nav.as_ref().and_then(|nav| {
+                    let base = self
+                        .signet_client
+                        .as_ref()
+                        .map(|c| c.base_url().to_string())
+                        .unwrap_or_else(|| "http://localhost:3850".to_string());
+                    nav.selected_url(&base)
+                });
+
+                self.dashboard_nav = None;
+
+                if let Some(url) = url {
+                    let result = std::process::Command::new("open")
+                        .arg(&url)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+
+                    match result {
+                        Ok(s) if s.success() => {
+                            self.entries.push(ChatEntry::Status(format!(
+                                "Dashboard opened: {url}"
+                            )));
+                        }
+                        _ => {
+                            self.entries.push(ChatEntry::Error(format!(
+                                "Failed to open dashboard. Visit: {url}"
+                            )));
+                        }
                     }
                 }
             }

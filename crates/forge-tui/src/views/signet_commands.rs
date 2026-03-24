@@ -1,7 +1,8 @@
+use crate::theme::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
@@ -279,10 +280,8 @@ impl CommandPicker {
         self.filter.pop();
         self.selected = 0;
     }
-}
 
-impl Widget for &CommandPicker {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    pub fn render_themed(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Center the overlay
         let width = 60.min(area.width.saturating_sub(4));
         let height = 22.min(area.height.saturating_sub(4));
@@ -295,9 +294,9 @@ impl Widget for &CommandPicker {
 
         let block = Block::default()
             .title(" Signet Commands (Ctrl+G) ")
-            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .title_style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_style(Style::default().fg(theme.border));
 
         let inner = block.inner(popup);
         block.render(popup, buf);
@@ -312,7 +311,7 @@ impl Widget for &CommandPicker {
         };
         lines.push(Line::from(Span::styled(
             filter_display,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.muted),
         )));
         lines.push(Line::from(""));
 
@@ -326,15 +325,15 @@ impl Widget for &CommandPicker {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!(" {marker} "),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!("{:<20}", cmd.label),
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         cmd.description,
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg),
                     ),
                 ]));
             } else {
@@ -342,11 +341,11 @@ impl Widget for &CommandPicker {
                     Span::raw(format!(" {marker} ")),
                     Span::styled(
                         format!("{:<20}", cmd.label),
-                        Style::default().fg(Color::Gray),
+                        Style::default().fg(theme.fg),
                     ),
                     Span::styled(
                         cmd.description,
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme.muted),
                     ),
                 ]));
             }
@@ -355,7 +354,7 @@ impl Widget for &CommandPicker {
         if filtered.is_empty() {
             lines.push(Line::from(Span::styled(
                 "  No matching commands",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.muted),
             )));
         }
 
@@ -363,7 +362,7 @@ impl Widget for &CommandPicker {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             " ↑/↓ navigate  Enter run  Esc close",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.muted),
         )));
 
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -426,11 +425,10 @@ pub fn help_text() -> String {
 
 /// Render a slash command autocomplete dropdown above the input area.
 /// Shows filtered commands as greyed-out suggestions.
-pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer) {
+pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer, theme: &Theme) {
     let query = input.trim_start_matches('/');
     if query.is_empty() {
-        // Show all commands when just "/" is typed
-        render_suggestions(&all_commands(), area, buf);
+        render_suggestions(&all_commands(), area, buf, theme);
         return;
     }
 
@@ -441,28 +439,27 @@ pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer) {
         .collect();
 
     if !matches.is_empty() {
-        render_suggestions(&matches, area, buf);
+        render_suggestions(&matches, area, buf, theme);
     }
 }
 
-fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer) {
+fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer, theme: &Theme) {
     // Show max 8 suggestions, positioned above the input area
     let max_show = 8.min(commands.len());
-    let height = (max_show + 1) as u16; // +1 for border
+    let height = (max_show + 1) as u16;
     let width = 50u16.min(area.width.saturating_sub(4));
 
-    // Position above the input area (area is the input rect)
     let y = area.y.saturating_sub(height + 1);
     let x = area.x + 2;
     let popup = Rect::new(x, y, width, height);
 
-    // Clear background
+    // Clear background with surface color
     for row in popup.y..popup.y + popup.height {
         for col in popup.x..popup.x + popup.width {
             if col < buf.area().width && row < buf.area().height {
                 buf[(col, row)]
                     .set_char(' ')
-                    .set_bg(Color::Rgb(25, 25, 25));
+                    .set_bg(theme.surface);
             }
         }
     }
@@ -476,11 +473,11 @@ fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer) 
 
         let label_span = Span::styled(
             format!(" {:<18}", cmd.label),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.muted),
         );
         let desc_span = Span::styled(
             cmd.description,
-            Style::default().fg(Color::Rgb(60, 60, 60)),
+            Style::default().fg(theme.border),
         );
         let line = Line::from(vec![label_span, desc_span]);
         buf.set_line(popup.x, row, &line, popup.width);
@@ -491,7 +488,7 @@ fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer) 
         if more_row < buf.area().height {
             let more = Span::styled(
                 format!(" ... {} more", commands.len() - max_show),
-                Style::default().fg(Color::Rgb(50, 50, 50)),
+                Style::default().fg(theme.muted),
             );
             buf.set_line(popup.x, more_row, &Line::from(more), popup.width);
         }

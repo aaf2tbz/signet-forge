@@ -33,6 +33,8 @@ pub enum Action {
     CommandPalette,
     /// Open dashboard
     Dashboard,
+    /// Open dashboard navigator (Ctrl+Tab)
+    DashboardNav,
     /// Clear screen
     ClearScreen,
     /// Open Signet command picker

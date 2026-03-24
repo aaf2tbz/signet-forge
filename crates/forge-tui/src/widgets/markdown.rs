@@ -1,11 +1,12 @@
+use crate::theme::Theme;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
-/// Convert markdown text to styled ratatui Lines
-pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
+/// Convert markdown text to styled ratatui Lines, using theme colors
+pub fn render_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -13,7 +14,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     let parser = Parser::new_ext(text, options);
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_spans: Vec<Span<'static>> = Vec::new();
-    let mut style_stack: Vec<Style> = vec![Style::default()];
+    let mut style_stack: Vec<Style> = vec![Style::default().fg(theme.fg)];
     let mut in_code_block = false;
     let mut code_lang = String::new();
     let mut code_content = String::new();
@@ -27,9 +28,9 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     flush_line(&mut current_spans, &mut lines);
                     lines.push(Line::from(""));
                     let color = match level {
-                        pulldown_cmark::HeadingLevel::H1 => Color::Cyan,
-                        pulldown_cmark::HeadingLevel::H2 => Color::Green,
-                        _ => Color::Yellow,
+                        pulldown_cmark::HeadingLevel::H1 => theme.accent,
+                        pulldown_cmark::HeadingLevel::H2 => theme.success,
+                        _ => theme.warning,
                     };
                     style_stack.push(
                         Style::default()
@@ -78,22 +79,21 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     };
                     current_spans.push(Span::styled(
                         bullet,
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(theme.accent),
                     ));
                 }
                 Tag::BlockQuote(_) => {
                     flush_line(&mut current_spans, &mut lines);
                     let base = current_style(&style_stack);
-                    style_stack.push(base.fg(Color::DarkGray));
+                    style_stack.push(base.fg(theme.muted));
                     current_spans.push(Span::styled(
                         "│ ",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme.muted),
                     ));
                 }
                 Tag::Link { dest_url, .. } => {
                     let base = current_style(&style_stack);
-                    style_stack.push(base.fg(Color::Blue).add_modifier(Modifier::UNDERLINED));
-                    // Store URL for later
+                    style_stack.push(base.fg(theme.accent).add_modifier(Modifier::UNDERLINED));
                     let _ = dest_url;
                 }
                 _ => {}
@@ -112,7 +112,6 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 }
                 TagEnd::CodeBlock => {
                     in_code_block = false;
-                    // Render code block with background
                     let lang_display = if code_lang.is_empty() {
                         String::new()
                     } else {
@@ -120,20 +119,20 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     };
                     lines.push(Line::from(Span::styled(
                         format!("  ┌─{lang_display}─"),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme.border),
                     )));
                     for code_line in code_content.lines() {
                         lines.push(Line::from(vec![
-                            Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
+                            Span::styled("  │ ", Style::default().fg(theme.border)),
                             Span::styled(
                                 code_line.to_string(),
-                                Style::default().fg(Color::Green),
+                                Style::default().fg(theme.code),
                             ),
                         ]));
                     }
                     lines.push(Line::from(Span::styled(
                         "  └───",
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme.border),
                     )));
                     code_content.clear();
                 }
@@ -165,7 +164,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 current_spans.push(Span::styled(
                     format!("`{code}`"),
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(theme.code)
                         .add_modifier(Modifier::BOLD),
                 ));
             }
@@ -180,7 +179,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 flush_line(&mut current_spans, &mut lines);
                 lines.push(Line::from(Span::styled(
                     "  ───────────────────",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.muted),
                 )));
             }
             _ => {}

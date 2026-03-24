@@ -13,6 +13,7 @@ pub const KEYBIND_ACTIONS: &[(&str, &str, &str)] = &[
     ("command_palette", "Command Palette", "Ctrl+K"),
     ("signet_commands", "Signet Commands", "Ctrl+G"),
     ("dashboard", "Dashboard", "Ctrl+D"),
+    ("dashboard_nav", "Dashboard Navigator", "Ctrl+Tab"),
     ("clear_screen", "Clear Screen", "Ctrl+L"),
     ("scroll_up", "Scroll Up", "PageUp"),
     ("scroll_down", "Scroll Down", "PageDown"),

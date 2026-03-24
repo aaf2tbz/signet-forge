@@ -1,8 +1,9 @@
+use crate::theme::Theme;
 use crate::widgets::markdown::render_markdown;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget, Wrap},
 };
@@ -41,10 +42,13 @@ pub struct ChatView<'a> {
     pub scroll_offset: u16,
     /// Animated status line (rendered below streaming text when processing)
     pub activity_line: Option<String>,
+    /// Active color theme
+    pub theme: &'a Theme,
 }
 
 impl<'a> Widget for ChatView<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let t = self.theme;
         let mut lines: Vec<Line> = Vec::new();
 
         // Welcome message if empty
@@ -52,16 +56,16 @@ impl<'a> Widget for ChatView<'a> {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Welcome to Forge — Signet's native AI terminal.",
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(t.accent),
             )));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Type a message and press Enter to start.",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(t.muted),
             )));
             lines.push(Line::from(Span::styled(
-                "  Press Ctrl+D to quit, Ctrl+O for model picker.",
-                Style::default().fg(Color::DarkGray),
+                "  Press Ctrl+Q to quit, Ctrl+O for model picker.",
+                Style::default().fg(t.muted),
             )));
         }
 
@@ -69,7 +73,6 @@ impl<'a> Widget for ChatView<'a> {
             match entry {
                 ChatEntry::UserMessage(text) => {
                     lines.push(Line::from(""));
-                    // Show user message with each line
                     let mut first = true;
                     for line in text.lines() {
                         if first {
@@ -77,34 +80,32 @@ impl<'a> Widget for ChatView<'a> {
                                 Span::styled(
                                     "  > ",
                                     Style::default()
-                                        .fg(Color::Cyan)
+                                        .fg(t.user)
                                         .add_modifier(Modifier::BOLD),
                                 ),
-                                Span::styled(line, Style::default().fg(Color::White)),
+                                Span::styled(line, Style::default().fg(t.fg_bright)),
                             ]));
                             first = false;
                         } else {
                             lines.push(Line::from(Span::styled(
                                 format!("    {line}"),
-                                Style::default().fg(Color::White),
+                                Style::default().fg(t.fg_bright),
                             )));
                         }
                     }
                 }
                 ChatEntry::AssistantText(text) => {
                     lines.push(Line::from(""));
-                    let md_lines = render_markdown(text);
+                    let md_lines = render_markdown(text, t);
                     for md_line in md_lines {
-                        // Indent markdown lines
                         let mut indented_spans = vec![Span::raw("  ")];
                         indented_spans.extend(md_line.spans);
                         lines.push(Line::from(indented_spans));
                     }
                 }
                 ChatEntry::Ephemeral(text) => {
-                    // Rendered same as AssistantText — but auto-cleared on typing
                     lines.push(Line::from(""));
-                    let md_lines = render_markdown(text);
+                    let md_lines = render_markdown(text, t);
                     for md_line in md_lines {
                         let mut indented_spans = vec![Span::raw("  ")];
                         indented_spans.extend(md_line.spans);
@@ -113,35 +114,33 @@ impl<'a> Widget for ChatView<'a> {
                 }
                 ChatEntry::ToolCall { name, status } => {
                     let (indicator, color) = match status {
-                        ToolStatus::Running => ("⟳", Color::Yellow),
-                        ToolStatus::Complete => ("✓", Color::Green),
-                        ToolStatus::Error => ("✗", Color::Red),
+                        ToolStatus::Running => ("⟳", t.warning),
+                        ToolStatus::Complete => ("✓", t.success),
+                        ToolStatus::Error => ("✗", t.error),
                     };
                     lines.push(Line::from(vec![
                         Span::raw("  "),
                         Span::styled(indicator, Style::default().fg(color)),
-                        Span::styled(" [", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" [", Style::default().fg(t.muted)),
                         Span::styled(
                             name,
                             Style::default()
-                                .fg(Color::Magenta)
+                                .fg(t.tool)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled("]", Style::default().fg(Color::DarkGray)),
+                        Span::styled("]", Style::default().fg(t.muted)),
                     ]));
                 }
                 ChatEntry::ToolOutput {
                     output, is_error, ..
                 } => {
                     let style = if *is_error {
-                        Style::default().fg(Color::Red)
+                        Style::default().fg(t.error)
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(t.muted)
                     };
-                    // Show first few lines of output, indented
                     let max_lines = 15;
                     for line in output.lines().take(max_lines) {
-                        // Truncate long lines (UTF-8 safe)
                         let display = if line.len() > 120 {
                             let boundary = line
                                 .char_indices()
@@ -163,7 +162,7 @@ impl<'a> Widget for ChatView<'a> {
                         lines.push(Line::from(Span::styled(
                             format!("    ... ({} more lines)", total_lines - max_lines),
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(t.muted)
                                 .add_modifier(Modifier::ITALIC),
                         )));
                     }
@@ -172,14 +171,14 @@ impl<'a> Widget for ChatView<'a> {
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
                         format!("  Error: {msg}"),
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.error).add_modifier(Modifier::BOLD),
                     )));
                 }
                 ChatEntry::Status(msg) => {
                     lines.push(Line::from(Span::styled(
                         format!("  {msg}"),
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(t.muted)
                             .add_modifier(Modifier::ITALIC),
                     )));
                 }
@@ -189,7 +188,7 @@ impl<'a> Widget for ChatView<'a> {
         // Streaming text (currently being generated)
         if !self.streaming_text.is_empty() {
             lines.push(Line::from(""));
-            let md_lines = render_markdown(self.streaming_text);
+            let md_lines = render_markdown(self.streaming_text, t);
             for md_line in md_lines {
                 let mut indented_spans = vec![Span::raw("  ")];
                 indented_spans.extend(md_line.spans);
@@ -198,7 +197,7 @@ impl<'a> Widget for ChatView<'a> {
             // Cursor indicator
             lines.push(Line::from(Span::styled(
                 "  ▌",
-                Style::default().fg(Color::Green),
+                Style::default().fg(t.assistant),
             )));
         }
 
@@ -208,7 +207,7 @@ impl<'a> Widget for ChatView<'a> {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     activity.clone(),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(t.accent),
                 )));
             }
         }

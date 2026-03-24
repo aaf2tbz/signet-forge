@@ -50,7 +50,7 @@ impl<'a> Widget for StatusBar<'a> {
                 Style::default().fg(self.muted),
             ),
             health_indicator,
-            Span::raw(" "),
+            Span::styled(" ", Style::default().fg(self.status_fg)),
             if self.effort != "medium" {
                 Span::styled(
                     format!("[{}] ", self.effort),
@@ -61,42 +61,47 @@ impl<'a> Widget for StatusBar<'a> {
                     }),
                 )
             } else {
-                Span::raw("")
+                Span::styled("", Style::default().fg(self.status_fg))
             },
             if self.total_memories > 0 {
-                Span::raw(format!(
-                    "{} recalled / {} memories",
-                    self.memories_injected, self.total_memories
-                ))
+                Span::styled(
+                    format!(
+                        "{} recalled / {} memories",
+                        self.memories_injected, self.total_memories
+                    ),
+                    Style::default().fg(self.status_fg),
+                )
             } else {
-                Span::raw(format!("{} memories", self.memories_injected))
+                Span::styled(
+                    format!("{} memories", self.memories_injected),
+                    Style::default().fg(self.status_fg),
+                )
             },
         ]);
 
         if area.height >= 1 {
             buf.set_line(area.x, area.y, &info_line, area.width);
-            // Fill background
             for x in area.x..area.x + area.width {
                 buf[(x, area.y)]
                     .set_bg(self.status_bg);
             }
         }
 
-        // Bottom line: key bindings
+        // Bottom line: key bindings — all text uses theme colors
         if area.height >= 2 {
             let keys_line = Line::from(vec![
                 Span::styled(" ^O", Style::default().fg(self.accent)),
-                Span::raw(" model "),
+                Span::styled(" model ", Style::default().fg(self.status_fg)),
                 Span::styled("^K", Style::default().fg(self.accent)),
-                Span::raw(" cmd "),
-                Span::styled("^D", Style::default().fg(self.accent)),
-                Span::raw(" dashboard "),
+                Span::styled(" cmd ", Style::default().fg(self.status_fg)),
+                Span::styled("^Tab", Style::default().fg(self.accent)),
+                Span::styled(" dashboard ", Style::default().fg(self.status_fg)),
                 Span::styled("^G", Style::default().fg(self.accent)),
-                Span::raw(" signet "),
+                Span::styled(" signet ", Style::default().fg(self.status_fg)),
                 Span::styled("^C", Style::default().fg(self.accent)),
-                Span::raw(" cancel "),
+                Span::styled(" cancel ", Style::default().fg(self.status_fg)),
                 Span::styled("^Q", Style::default().fg(self.accent)),
-                Span::raw(" quit"),
+                Span::styled(" quit", Style::default().fg(self.status_fg)),
             ]);
 
             buf.set_line(area.x, area.y + 1, &keys_line, area.width);

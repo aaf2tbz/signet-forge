@@ -1,6 +1,7 @@
+use crate::theme::Theme;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
@@ -116,12 +117,12 @@ impl CommandPalette {
         self.selected = 0;
     }
 
-    pub fn draw(&self, frame: &mut Frame) {
+    pub fn draw(&self, frame: &mut Frame, theme: &Theme) {
         let area = frame.area();
         let width = 56u16.min(area.width.saturating_sub(4));
         let height = 18u16.min(area.height.saturating_sub(4));
         let x = (area.width.saturating_sub(width)) / 2;
-        let y = 2u16.min(area.height.saturating_sub(height)); // Near the top
+        let y = 2u16.min(area.height.saturating_sub(height));
         let dialog_area = Rect::new(x, y, width, height);
 
         frame.render_widget(Clear, dialog_area);
@@ -131,7 +132,7 @@ impl CommandPalette {
 
         // Search filter
         lines.push(Line::from(vec![
-            Span::styled("  > ", Style::default().fg(Color::Yellow)),
+            Span::styled("  > ", Style::default().fg(theme.accent)),
             Span::styled(
                 if self.filter.is_empty() {
                     "type to filter...".to_string()
@@ -139,9 +140,9 @@ impl CommandPalette {
                     self.filter.clone()
                 },
                 if self.filter.is_empty() {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(theme.muted)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(theme.fg)
                 },
             ),
         ]));
@@ -152,17 +153,17 @@ impl CommandPalette {
             let is_selected = i == self.selected;
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme.fg)
             };
 
             let desc_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
+                Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme.muted)
             };
 
             let kind_indicator = match &cmd.kind {
@@ -184,20 +185,21 @@ impl CommandPalette {
         if filtered.is_empty() {
             lines.push(Line::from(Span::styled(
                 "   No matching commands",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.muted),
             )));
         }
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  ↑↓ navigate  Enter select  Esc cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.muted),
         )));
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow))
-            .title(" Commands (^K) ");
+            .border_style(Style::default().fg(theme.accent))
+            .title(" Commands (^K) ")
+            .title_style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD));
 
         let paragraph = Paragraph::new(lines).block(block);
         frame.render_widget(paragraph, dialog_area);

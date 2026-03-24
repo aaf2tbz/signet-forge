@@ -1,6 +1,7 @@
+use crate::theme::Theme;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
@@ -43,7 +44,6 @@ impl ModelPicker {
     pub fn with_cli(cli_provider: &str, cli_path: &str) -> Self {
         let mut models = Vec::new();
 
-        // Add CLI models first based on which CLI is active
         match cli_provider {
             "claude-cli" => {
                 for (model, name, ctx) in &[
@@ -92,7 +92,6 @@ impl ModelPicker {
             _ => {}
         }
 
-        // Add standard API models too (user might want to switch away from CLI)
         models.extend(default_models());
 
         Self {
@@ -142,7 +141,7 @@ impl ModelPicker {
         self.selected = 0;
     }
 
-    pub fn draw(&self, frame: &mut Frame) {
+    pub fn draw(&self, frame: &mut Frame, theme: &Theme) {
         let area = frame.area();
         let width = 56u16.min(area.width.saturating_sub(4));
         let height = 20u16.min(area.height.saturating_sub(4));
@@ -157,7 +156,7 @@ impl ModelPicker {
 
         // Search filter
         lines.push(Line::from(vec![
-            Span::styled("  Search: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Search: ", Style::default().fg(theme.muted)),
             Span::styled(
                 if self.filter.is_empty() {
                     "type to filter...".to_string()
@@ -165,9 +164,9 @@ impl ModelPicker {
                     self.filter.clone()
                 },
                 if self.filter.is_empty() {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(theme.muted)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(theme.fg)
                 },
             ),
         ]));
@@ -178,19 +177,19 @@ impl ModelPicker {
             let is_selected = i == self.selected;
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme.fg)
             };
 
             let provider_style = if is_selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme.muted)
             };
 
             let ctx = format_context(model.context_window);
@@ -211,7 +210,7 @@ impl ModelPicker {
         if filtered.is_empty() {
             lines.push(Line::from(Span::styled(
                 "   No matching models",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.muted),
             )));
         }
 
@@ -219,13 +218,14 @@ impl ModelPicker {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  ↑↓ navigate  Enter select  Esc cancel",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.muted),
         )));
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
-            .title(" Select Model (^O) ");
+            .border_style(Style::default().fg(theme.accent))
+            .title(" Select Model (^O) ")
+            .title_style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD));
 
         let paragraph = Paragraph::new(lines).block(block);
         frame.render_widget(paragraph, dialog_area);
