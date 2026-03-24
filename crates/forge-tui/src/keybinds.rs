@@ -17,6 +17,7 @@ pub const KEYBIND_ACTIONS: &[(&str, &str, &str)] = &[
     ("scroll_up", "Scroll Up", "PageUp"),
     ("scroll_down", "Scroll Down", "PageDown"),
     ("newline", "Insert Newline", "Shift+Enter"),
+    ("paste", "Paste", "Ctrl+V"),
 ];
 
 /// Stored keybinding configuration

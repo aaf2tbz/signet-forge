@@ -21,3 +21,4 @@ syntect = { workspace = true }
 arboard = { workspace = true }
 tracing = { workspace = true }
 dirs = { workspace = true }
+png = { workspace = true }

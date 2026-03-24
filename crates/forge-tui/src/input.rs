@@ -39,6 +39,8 @@ pub enum Action {
     SignetCommands,
     /// Insert newline in input
     NewLine,
+    /// Paste from clipboard
+    Paste,
     /// No action
     None,
 }

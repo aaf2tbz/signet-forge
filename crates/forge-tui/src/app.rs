@@ -6,6 +6,7 @@ use crate::views::model_picker::ModelPicker;
 use crate::views::signet_commands::{self, CommandPicker};
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::terminal;
 use forge_agent::{
     AgentEvent, AgentLoop, PermissionManager, PermissionRequest, PermissionResponse, Session,
     SessionStore, SharedSession,
@@ -99,6 +100,8 @@ pub struct App {
     theme: crate::theme::Theme,
     /// Keybinding configuration (loaded from ~/.config/forge/keybinds.json)
     keybinds: KeyBindConfig,
+    /// Attached image paths (from drag-and-drop or paste)
+    attached_images: Vec<String>,
     /// CLI binary path (if using a CLI provider)
     cli_path: Option<String>,
     /// Current reasoning effort level (shared with agent loop)
@@ -281,6 +284,7 @@ impl App {
             context_window,
             theme: crate::theme::Theme::by_name(theme_name),
             keybinds: KeyBindConfig::load(),
+            attached_images: Vec::new(),
             cli_path,
             effort,
             memories_injected,
@@ -319,6 +323,9 @@ impl App {
             self.model, self.provider_name
         );
 
+        // Enable bracketed paste so we can detect drag-and-drop file paths
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste);
+
         loop {
             // Increment animation tick
             self.tick = self.tick.wrapping_add(1);
@@ -328,10 +335,17 @@ impl App {
 
             // Handle events with a short timeout so we can process agent events
             if event::poll(std::time::Duration::from_millis(50))? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
                         self.handle_key(key).await;
                     }
+                    Event::Paste(text) => {
+                        // Bracketed paste — handle file drops and multi-line paste
+                        if !self.processing {
+                            self.handle_paste(&text);
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -417,6 +431,9 @@ impl App {
                 break;
             }
         }
+
+        // Disable bracketed paste
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableBracketedPaste);
 
         // Submit transcript for extraction
         self.submit_transcript().await;
@@ -648,6 +665,7 @@ impl App {
                 "scroll_up" => Action::ScrollUp,
                 "scroll_down" => Action::ScrollDown,
                 "newline" => Action::NewLine,
+                "paste" => Action::Paste,
                 _ => Action::None,
             }
         } else {
@@ -748,6 +766,9 @@ impl App {
             Action::CommandPalette if !self.processing => {
                 self.command_palette = Some(CommandPalette::new(&self.skills));
             }
+            Action::Paste if !self.processing => {
+                self.clipboard_paste();
+            }
             Action::ClearScreen => {
                 self.entries.clear();
                 self.streaming_text.clear();
@@ -829,6 +850,76 @@ impl App {
     }
 
     /// Handle /slash commands typed in the input
+    /// Handle pasted text — detect image file paths or insert as text
+    fn handle_paste(&mut self, text: &str) {
+        let trimmed = text.trim();
+
+        // Check if it's an image file path (dragged into terminal)
+        if is_image_path(trimmed) {
+            let path = trimmed
+                .trim_matches('\'')
+                .trim_matches('"')
+                .to_string();
+
+            if std::path::Path::new(&path).exists() {
+                self.attached_images.push(path.clone());
+                self.entries.push(ChatEntry::Status(format!(
+                    "◇ Image attached: {} ({} total)",
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.clone()),
+                    self.attached_images.len()
+                )));
+                return;
+            }
+        }
+
+        // Regular text paste — insert at cursor
+        for c in trimmed.chars() {
+            if c == '\n' {
+                self.input.push('\n');
+            } else {
+                self.input.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+        }
+        self.last_keystroke = std::time::Instant::now();
+    }
+
+    /// Paste from system clipboard
+    fn clipboard_paste(&mut self) {
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            // Try image first
+            if let Ok(img) = clipboard.get_image() {
+                // Save to temp file and attach
+                let temp_path = std::env::temp_dir().join(format!(
+                    "forge-paste-{}.png",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                ));
+                // Convert arboard image to PNG
+                if let Ok(()) = save_clipboard_image(&img, &temp_path) {
+                    self.attached_images.push(temp_path.display().to_string());
+                    self.entries.push(ChatEntry::Status(format!(
+                        "◇ Image pasted from clipboard ({} total)",
+                        self.attached_images.len()
+                    )));
+                    return;
+                }
+            }
+
+            // Fall back to text
+            if let Ok(text) = clipboard.get_text() {
+                if !text.is_empty() {
+                    self.handle_paste(&text);
+                }
+            }
+        }
+    }
+
     async fn handle_slash_command(&mut self, input: &str) {
         let trimmed = input.trim_start_matches('/');
         let (cmd_name, args) = match trimmed.split_once(' ') {
@@ -1518,4 +1609,42 @@ fn parse_memory_count(context: &str) -> usize {
     } else {
         0
     }
+}
+
+/// Check if a path looks like an image file
+fn is_image_path(text: &str) -> bool {
+    let path = text
+        .trim()
+        .trim_matches('\'')
+        .trim_matches('"');
+    let lower = path.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".bmp")
+        || lower.ends_with(".svg")
+}
+
+/// Save an arboard clipboard image to a PNG file
+fn save_clipboard_image(
+    img: &arboard::ImageData,
+    path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // arboard gives us RGBA bytes
+    let width = img.width as u32;
+    let height = img.height as u32;
+
+    let file = std::fs::File::create(path)?;
+    let writer = std::io::BufWriter::new(file);
+
+    let mut encoder = png::Encoder::new(writer, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&img.bytes)?;
+
+    Ok(())
 }
