@@ -57,6 +57,7 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Arc<dyn Provider>,
         hooks: Option<SessionHooks>,

@@ -221,7 +221,7 @@ impl<'a> Widget for ChatView<'a> {
                 .iter()
                 .map(|line| {
                     let content_width: usize = line.spans.iter().map(|s| s.content.len()).sum();
-                    1u16.max(((content_width + width - 1) / width) as u16)
+                    1u16.max(content_width.div_ceil(width) as u16)
                 })
                 .sum()
         };
