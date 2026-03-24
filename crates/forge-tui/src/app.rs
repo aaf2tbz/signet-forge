@@ -442,6 +442,10 @@ impl App {
                         // Bracketed paste — handle file drops and multi-line paste
                         self.handle_paste(&text);
                     }
+                    Event::Resize(_, _) => {
+                        // Terminal resized — reset scroll to bottom so content reflows
+                        self.scroll_offset = 0;
+                    }
                     _ => {}
                 }
             }

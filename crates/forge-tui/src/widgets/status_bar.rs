@@ -106,13 +106,20 @@ impl<'a> Widget for StatusBar<'a> {
                 ("session_browser", "Sessions"),
             ];
 
+            // Only show hints that fit within terminal width
             let mut spans = vec![Span::styled(" ", border)];
+            let mut used = 1u16;
             for (action, name) in hints {
                 let combo = self.keybinds.get(action);
+                let hint_width = combo.len() as u16 + name.len() as u16 + 4; // [combo name]_
+                if used + hint_width > area.width {
+                    break;
+                }
                 spans.push(Span::styled("[", border));
                 spans.push(Span::styled(combo.to_string(), key));
                 spans.push(Span::styled(format!(" {name}"), label));
                 spans.push(Span::styled("] ", border));
+                used += hint_width;
             }
             let keys_line = Line::from(spans);
 
