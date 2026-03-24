@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod cli;
 pub mod gemini;
 pub mod openai;
 pub mod streaming;
@@ -70,7 +71,7 @@ pub trait Provider: Send + Sync {
     async fn available(&self) -> bool;
 }
 
-/// Create a provider by name
+/// Create a provider by name (API-based providers)
 pub fn create_provider(
     provider_name: &str,
     model: &str,
@@ -91,9 +92,22 @@ pub fn create_provider(
         "openrouter" => Ok(Box::new(openai::openrouter(model, api_key))),
         "xai" => Ok(Box::new(openai::xai(model, api_key))),
         other => Err(ForgeError::provider(format!(
-            "Unknown provider: {other}. Available: anthropic, openai, gemini, groq, ollama, openrouter, xai"
+            "Unknown provider: {other}. Available: anthropic, openai, gemini, groq, ollama, openrouter, xai, claude-cli, codex-cli, gemini-cli"
         ))),
     }
+}
+
+/// Create a CLI-based provider
+pub fn create_cli_provider(
+    kind: cli::CliKind,
+    cli_path: &str,
+    model: &str,
+) -> Box<dyn Provider> {
+    Box::new(cli::CliProvider::new(
+        kind,
+        cli_path.to_string(),
+        model.to_string(),
+    ))
 }
 
 /// List all available provider names

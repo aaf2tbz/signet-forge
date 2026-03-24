@@ -22,3 +22,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 forge-tools = { workspace = true }
 futures = { workspace = true }
+dirs = { workspace = true }
+reqwest = { workspace = true }

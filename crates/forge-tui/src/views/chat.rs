@@ -37,6 +37,8 @@ pub struct ChatView<'a> {
     pub entries: &'a [ChatEntry],
     pub streaming_text: &'a str,
     pub scroll_offset: u16,
+    /// Animated status line (rendered below streaming text when processing)
+    pub activity_line: Option<String>,
 }
 
 impl<'a> Widget for ChatView<'a> {
@@ -186,6 +188,17 @@ impl<'a> Widget for ChatView<'a> {
                 "  ▌",
                 Style::default().fg(Color::Green),
             )));
+        }
+
+        // Activity indicator (animated spinner during processing)
+        if let Some(activity) = &self.activity_line {
+            if !activity.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    activity.clone(),
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
         }
 
         // Auto-scroll: if scroll_offset is 0, show the bottom

@@ -14,6 +14,7 @@ pub struct StatusBar<'a> {
     pub output_tokens: usize,
     pub context_window: usize,
     pub memories_injected: usize,
+    pub total_memories: usize,
     pub daemon_healthy: bool,
 }
 
@@ -38,10 +39,15 @@ impl<'a> Widget for StatusBar<'a> {
                 Style::default().fg(Color::DarkGray),
             ),
             health_indicator,
-            Span::raw(format!(
-                " {} memories",
-                self.memories_injected
-            )),
+            Span::raw(" "),
+            if self.total_memories > 0 {
+                Span::raw(format!(
+                    "{} recalled / {} memories",
+                    self.memories_injected, self.total_memories
+                ))
+            } else {
+                Span::raw(format!("{} memories", self.memories_injected))
+            },
         ]);
 
         if area.height >= 1 {
@@ -62,6 +68,8 @@ impl<'a> Widget for StatusBar<'a> {
                 Span::raw(" cmd "),
                 Span::styled("F2", Style::default().fg(Color::Yellow)),
                 Span::raw(" dashboard "),
+                Span::styled("^H", Style::default().fg(Color::Yellow)),
+                Span::raw(" signet "),
                 Span::styled("^C", Style::default().fg(Color::Yellow)),
                 Span::raw(" cancel "),
                 Span::styled("^D", Style::default().fg(Color::Yellow)),

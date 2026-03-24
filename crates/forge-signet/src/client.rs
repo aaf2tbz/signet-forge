@@ -107,6 +107,19 @@ impl SignetClient {
             .map_err(|e| ForgeError::daemon(format!("POST {path} parse error: {e}")))
     }
 
+    /// Get total memory count from the daemon
+    pub async fn memory_count(&self) -> usize {
+        // GET /api/memories returns { memories: [...], stats: { total: N, ... } }
+        match self.get("/api/memories").await {
+            Ok(resp) => resp
+                .get("stats")
+                .and_then(|s| s.get("total"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize,
+            Err(_) => 0,
+        }
+    }
+
     pub fn base_url(&self) -> &str {
         &self.base_url
     }

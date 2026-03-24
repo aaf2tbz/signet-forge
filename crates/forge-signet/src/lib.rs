@@ -7,5 +7,6 @@ pub mod skills;
 pub mod watcher;
 
 pub use client::SignetClient;
+pub use secrets::{DiscoveredProvider, KeySource};
 pub use skills::Skill;
 pub use watcher::{ConfigEvent, ConfigWatcher};

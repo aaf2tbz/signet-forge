@@ -40,7 +40,8 @@ struct PromptSubmitPayload {
     session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     cwd: Option<String>,
-    content: String,
+    #[serde(rename = "userMessage")]
+    user_message: String,
     #[serde(rename = "runtimePath")]
     runtime_path: String,
 }
@@ -90,10 +91,10 @@ impl SessionHooks {
         }
     }
 
-    /// Call session-start hook — returns injected memories/context.
+    /// Call session-start hook — returns (injection_text, memory_count).
     /// The daemon injects relevant memories based on the project context
     /// and the predictor sidecar's relevance scoring.
-    pub async fn session_start(&self) -> Result<String, ForgeError> {
+    pub async fn session_start(&self) -> Result<(String, usize), ForgeError> {
         debug!("Calling session-start hook for session {}", self.session_id);
 
         let payload = SessionStartPayload {
@@ -108,32 +109,41 @@ impl SessionHooks {
 
         let result = self.client.post("/api/hooks/session-start", &body).await?;
 
+        // The daemon returns combined injection text in the "inject" field,
+        // plus structured data in "memories", "identity", "recentContext"
         let context = result
-            .get("stdout")
-            .or_else(|| result.get("context"))
+            .get("inject")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
+        // Count memories from the structured array if available
+        let memory_count = result
+            .get("memories")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+
         debug!(
-            "Session start hook returned {} bytes of context",
-            context.len()
+            "Session start: {} bytes inject, {} memories",
+            context.len(),
+            memory_count
         );
-        Ok(context)
+        Ok((context, memory_count))
     }
 
-    /// Call user-prompt-submit hook — returns per-prompt memory injection.
+    /// Call user-prompt-submit hook — returns (injection_text, memory_count).
     /// The daemon runs hybrid search (vector + keyword) against the memory
     /// database using the user's message as the query, scored by the
     /// predictor sidecar and importance decay.
-    pub async fn prompt_submit(&self, user_message: &str) -> Result<String, ForgeError> {
+    pub async fn prompt_submit(&self, user_message: &str) -> Result<(String, usize), ForgeError> {
         debug!("Calling user-prompt-submit hook");
 
         let payload = PromptSubmitPayload {
             harness: HARNESS_NAME.to_string(),
             session_id: self.session_id.clone(),
             cwd: self.project.clone(),
-            content: user_message.to_string(),
+            user_message: user_message.to_string(),
             runtime_path: RUNTIME_PATH.to_string(),
         };
 
@@ -146,13 +156,23 @@ impl SessionHooks {
             .await?;
 
         let injection = result
-            .get("stdout")
-            .or_else(|| result.get("injection"))
+            .get("inject")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        Ok(injection)
+        let memory_count = result
+            .get("memoryCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        debug!(
+            "Prompt submit: {} bytes inject, {} memories",
+            injection.len(),
+            memory_count
+        );
+
+        Ok((injection, memory_count as usize))
     }
 
     /// Call pre-compaction hook — called before auto-compacting context.

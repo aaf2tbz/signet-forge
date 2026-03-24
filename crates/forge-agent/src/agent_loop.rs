@@ -34,6 +34,8 @@ pub enum AgentEvent {
     Error(String),
     /// Thinking/status message
     Status(String),
+    /// Memory injection count from prompt-submit hook
+    MemoryCount(usize),
 }
 
 /// The core agentic loop
@@ -74,9 +76,17 @@ impl AgentLoop {
         // 1. Call user-prompt-submit hook for memory injection
         let mut memory_context = String::new();
         if let Some(hooks) = &self.hooks {
+            let _ = self
+                .event_tx
+                .send(AgentEvent::Status("◇ Recalling memories...".to_string()))
+                .await;
             match hooks.prompt_submit(user_input).await {
-                Ok(injection) if !injection.is_empty() => {
-                    debug!("Memory injection: {} bytes", injection.len());
+                Ok((injection, count)) if !injection.is_empty() => {
+                    debug!("Memory injection: {} bytes, {} memories", injection.len(), count);
+                    let _ = self
+                        .event_tx
+                        .send(AgentEvent::MemoryCount(count))
+                        .await;
                     memory_context = injection;
                 }
                 Ok(_) => {}
@@ -91,6 +101,12 @@ impl AgentLoop {
             let mut s = session.lock().await;
             s.add_message(Message::user(user_input));
         }
+
+        // Notify TUI that we're now waiting for the LLM
+        let _ = self
+            .event_tx
+            .send(AgentEvent::Status("◆ Thinking...".to_string()))
+            .await;
 
         // 3. Run the agentic loop
         loop {
@@ -358,4 +374,23 @@ impl AgentLoop {
             memory_context.clear();
         }
     }
+}
+
+/// Parse memory count from Signet's injection response.
+fn parse_memory_count(context: &str) -> usize {
+    // Try "results=N" from Signet recall header
+    for segment in context.split('|') {
+        let trimmed = segment.trim();
+        if let Some(rest) = trimmed.strip_prefix("results=") {
+            if let Ok(n) = rest.trim().parse::<usize>() {
+                return n;
+            }
+        }
+    }
+    // Count "- " prefixed memory entries
+    let entries = context.lines().filter(|l| l.starts_with("- ")).count();
+    if entries > 0 {
+        return entries;
+    }
+    if !context.trim().is_empty() { 1 } else { 0 }
 }

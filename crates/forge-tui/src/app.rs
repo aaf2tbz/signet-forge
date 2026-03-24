@@ -1,7 +1,8 @@
 use crate::input::{key_to_action, Action};
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
-use crate::views::command_palette::{CommandKind, CommandPalette};
+use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPalette};
 use crate::views::model_picker::ModelPicker;
+use crate::views::signet_commands::{self, CommandPicker};
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
 use forge_agent::{
@@ -21,7 +22,7 @@ use ratatui::{
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::info;
+use tracing::{debug, info};
 
 /// Permission dialog state
 struct PermissionDialog {
@@ -29,6 +30,50 @@ struct PermissionDialog {
     tool_input: serde_json::Value,
     response_tx: tokio::sync::oneshot::Sender<PermissionResponse>,
     selected: usize, // 0=Allow, 1=Always Allow, 2=Deny
+}
+
+/// What the agent is currently doing (for animated indicators)
+#[derive(Debug, Clone, PartialEq)]
+enum ProcessingPhase {
+    Idle,
+    RecallingMemories,
+    Thinking,
+    Streaming,
+    ExecutingTool(String),
+}
+
+impl ProcessingPhase {
+    /// Spinner frames — Signet-themed geometric sequence
+    const FRAMES: &[&str] = &["◇", "◈", "◆", "◈"];
+
+    fn label(&self) -> &str {
+        match self {
+            Self::Idle => "",
+            Self::RecallingMemories => "Recalling memories",
+            Self::Thinking => "Thinking",
+            Self::Streaming => "",
+            Self::ExecutingTool(_) => "Executing",
+        }
+    }
+
+    fn render(&self, tick: usize) -> String {
+        let frame = Self::FRAMES[tick % Self::FRAMES.len()];
+        match self {
+            Self::Idle | Self::Streaming => String::new(),
+            Self::RecallingMemories => {
+                let dots = ".".repeat((tick / 4) % 4);
+                format!("  {frame} Recalling memories{dots}")
+            }
+            Self::Thinking => {
+                let dots = ".".repeat((tick / 4) % 4);
+                format!("  {frame} Thinking{dots}")
+            }
+            Self::ExecutingTool(name) => {
+                let dots = ".".repeat((tick / 4) % 4);
+                format!("  {frame} Running {name}{dots}")
+            }
+        }
+    }
 }
 
 /// Application state
@@ -49,12 +94,18 @@ pub struct App {
     model: String,
     provider_name: String,
     context_window: usize,
-    /// Memories injected this session
+    /// Memories recalled for current prompt
     memories_injected: usize,
+    /// Total memories in database
+    total_memories: usize,
     /// Daemon health status
     daemon_healthy: bool,
     /// Is the agent currently processing?
     processing: bool,
+    /// Current processing phase (for animated status)
+    processing_phase: ProcessingPhase,
+    /// Animation tick counter (increments every frame)
+    tick: usize,
     /// Should quit?
     should_quit: bool,
     /// Agent event receiver
@@ -67,6 +118,8 @@ pub struct App {
     model_picker: Option<ModelPicker>,
     /// Command palette overlay
     command_palette: Option<CommandPalette>,
+    /// Signet command picker (Ctrl+H)
+    command_picker: Option<CommandPicker>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
@@ -120,13 +173,15 @@ impl App {
         let mut memories_injected = 0;
         if let Some(hooks) = &hooks {
             match hooks.session_start().await {
-                Ok(context) if !context.is_empty() => {
-                    info!("Session start hook returned {} bytes", context.len());
-                    memories_injected = context.matches("memory").count().max(1);
+                Ok((context, count)) if !context.is_empty() => {
+                    debug!("Session start: {} bytes, {} memories", context.len(), count);
+                    memories_injected = count;
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    debug!("Session start hook returned empty context");
+                }
                 Err(e) => {
-                    info!("Session start hook failed (non-fatal): {e}");
+                    debug!("Session start hook failed (non-fatal): {e}");
                 }
             }
         }
@@ -176,7 +231,14 @@ impl App {
 
         // Load skills from ~/.agents/skills/
         let skills = forge_signet::skills::load_skills();
-        info!("Loaded {} skills", skills.len());
+        debug!("Loaded {} skills", skills.len());
+
+        // Fetch total memory count from daemon
+        let total_memories = if let Some(client) = &signet_client {
+            client.memory_count().await
+        } else {
+            0
+        };
 
         Self {
             input: String::new(),
@@ -189,14 +251,18 @@ impl App {
             provider_name,
             context_window,
             memories_injected,
+            total_memories,
             daemon_healthy,
             processing: false,
+            processing_phase: ProcessingPhase::Idle,
+            tick: 0,
             should_quit: false,
             event_rx,
             permission_rx,
             permission_dialog: None,
             model_picker: None,
             command_palette: None,
+            command_picker: None,
             skills,
             signet_client,
             permissions,
@@ -216,11 +282,14 @@ impl App {
         );
 
         loop {
+            // Increment animation tick
+            self.tick = self.tick.wrapping_add(1);
+
             // Draw
             terminal.draw(|frame| self.draw(frame))?;
 
             // Handle events with a short timeout so we can process agent events
-            if event::poll(std::time::Duration::from_millis(16))? {
+            if event::poll(std::time::Duration::from_millis(50))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
                         self.handle_key(key).await;
@@ -301,15 +370,24 @@ impl App {
             output_tokens,
             context_window: self.context_window,
             memories_injected: self.memories_injected,
+            total_memories: self.total_memories,
             daemon_healthy: self.daemon_healthy,
         };
         status.render(chunks[0], frame.buffer_mut());
 
-        // Chat area
+        // Chat area — render animated activity line when processing
+        let activity_line = if self.processing && self.processing_phase != ProcessingPhase::Streaming {
+            let rendered = self.processing_phase.render(self.tick);
+            if rendered.is_empty() { None } else { Some(rendered) }
+        } else {
+            None
+        };
+
         let chat = ChatView {
             entries: &self.entries,
             streaming_text: &self.streaming_text,
             scroll_offset: self.scroll_offset,
+            activity_line,
         };
         chat.render(chunks[1], frame.buffer_mut());
 
@@ -354,6 +432,12 @@ impl App {
         // Command palette overlay
         if let Some(palette) = &self.command_palette {
             palette.draw(frame);
+        }
+
+        // Signet command picker overlay (Ctrl+H)
+        if let Some(picker) = &self.command_picker {
+            let area = frame.area();
+            picker.render(area, frame.buffer_mut());
         }
     }
 
@@ -427,6 +511,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If Signet command picker is open, handle picker keys
+        if self.command_picker.is_some() {
+            self.handle_command_picker_key(key).await;
+            return;
+        }
+
         // If command palette is open, handle palette keys
         if self.command_palette.is_some() {
             self.handle_command_palette_key(key).await;
@@ -452,17 +542,21 @@ impl App {
                 let input = self.input.clone();
                 self.input.clear();
                 self.cursor = 0;
-                self.processing = true;
 
-                self.entries.push(ChatEntry::UserMessage(input.clone()));
+                // Check for slash commands before sending to LLM
+                if input.starts_with('/') {
+                    self.handle_slash_command(&input).await;
+                } else {
+                    self.processing = true;
+                    self.processing_phase = ProcessingPhase::RecallingMemories;
+                    self.entries.push(ChatEntry::UserMessage(input.clone()));
 
-                // Spawn agent task with shared session
-                let agent = Arc::clone(&self.agent);
-                let session = Arc::clone(&self.session);
-
-                tokio::spawn(async move {
-                    agent.process_message(&session, &input).await;
-                });
+                    let agent = Arc::clone(&self.agent);
+                    let session = Arc::clone(&self.session);
+                    tokio::spawn(async move {
+                        agent.process_message(&session, &input).await;
+                    });
+                }
             }
             Action::InsertChar(c) if !self.processing => {
                 self.input.insert(self.cursor, c);
@@ -514,7 +608,196 @@ impl App {
                 self.streaming_text.clear();
                 self.scroll_offset = 0;
             }
+            Action::SignetCommands if !self.processing => {
+                self.command_picker = Some(CommandPicker::new());
+            }
+            Action::Dashboard => {
+                // Open Signet dashboard in default browser
+                let url = self
+                    .signet_client
+                    .as_ref()
+                    .map(|c| c.base_url().to_string())
+                    .unwrap_or_else(|| "http://localhost:3850".to_string());
+                let _ = tokio::process::Command::new("open")
+                    .arg(&url)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                self.entries.push(ChatEntry::Status(format!(
+                    "Dashboard opened: {url}"
+                )));
+            }
             _ => {}
+        }
+    }
+
+    async fn handle_command_picker_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Esc => {
+                self.command_picker = None;
+            }
+            KeyCode::Up => {
+                if let Some(picker) = &mut self.command_picker {
+                    picker.move_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(picker) = &mut self.command_picker {
+                    picker.move_down();
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(picker) = &self.command_picker {
+                    if let Some(cmd) = picker.selected_command() {
+                        self.command_picker = None;
+                        self.execute_signet_command(&cmd).await;
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(picker) = &mut self.command_picker {
+                    picker.pop_char();
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(picker) = &mut self.command_picker {
+                    picker.push_char(c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle /slash commands typed in the input
+    async fn handle_slash_command(&mut self, input: &str) {
+        let trimmed = input.trim_start_matches('/');
+        let (cmd_name, args) = match trimmed.split_once(' ') {
+            Some((name, rest)) => (name, rest.trim()),
+            None => (trimmed, ""),
+        };
+
+        // Special commands
+        match cmd_name {
+            "signet-help" | "help" => {
+                let help = signet_commands::help_text();
+                self.entries.push(ChatEntry::AssistantText(help));
+                return;
+            }
+            "recall" if !args.is_empty() => {
+                // /recall with args — run signet recall <query>
+                self.entries
+                    .push(ChatEntry::Status(format!("◇ Recalling: {args}")));
+                self.run_signet_cli(&["recall", args]).await;
+                return;
+            }
+            "remember" if !args.is_empty() => {
+                self.entries
+                    .push(ChatEntry::Status(format!("◇ Storing memory...")));
+                self.run_signet_cli(&["remember", args]).await;
+                return;
+            }
+            _ => {}
+        }
+
+        // Match against registered commands
+        let commands = signet_commands::all_commands();
+        if let Some(cmd) = commands.iter().find(|c| c.key == cmd_name) {
+            self.execute_signet_command(cmd).await;
+        } else {
+            self.entries.push(ChatEntry::Error(format!(
+                "Unknown command: /{cmd_name}. Type /signet-help for available commands."
+            )));
+        }
+    }
+
+    /// Execute a Signet command (CLI or API)
+    async fn execute_signet_command(&mut self, cmd: &signet_commands::SignetCommand) {
+        self.entries
+            .push(ChatEntry::Status(format!("◇ Running {}...", cmd.label)));
+
+        match &cmd.kind {
+            signet_commands::CommandKind::Cli(args) => {
+                self.run_signet_cli(args).await;
+            }
+            signet_commands::CommandKind::ApiGet(path) => {
+                if let Some(client) = &self.signet_client {
+                    match client.get(path).await {
+                        Ok(resp) => {
+                            let formatted =
+                                serde_json::to_string_pretty(&resp).unwrap_or_default();
+                            self.entries
+                                .push(ChatEntry::AssistantText(format!("```json\n{formatted}\n```")));
+                        }
+                        Err(e) => {
+                            self.entries
+                                .push(ChatEntry::Error(format!("API error: {e}")));
+                        }
+                    }
+                } else {
+                    self.entries.push(ChatEntry::Error(
+                        "Signet daemon not connected".to_string(),
+                    ));
+                }
+            }
+            signet_commands::CommandKind::ApiPost(path) => {
+                if let Some(client) = &self.signet_client {
+                    match client
+                        .post(path, &serde_json::json!({}))
+                        .await
+                    {
+                        Ok(resp) => {
+                            let formatted =
+                                serde_json::to_string_pretty(&resp).unwrap_or_default();
+                            self.entries.push(ChatEntry::AssistantText(format!(
+                                "```json\n{formatted}\n```"
+                            )));
+                        }
+                        Err(e) => {
+                            self.entries
+                                .push(ChatEntry::Error(format!("API error: {e}")));
+                        }
+                    }
+                } else {
+                    self.entries.push(ChatEntry::Error(
+                        "Signet daemon not connected".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Run a signet CLI command and display output
+    async fn run_signet_cli(&mut self, args: &[&str]) {
+        match tokio::process::Command::new("signet")
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                if !stdout.trim().is_empty() {
+                    self.entries
+                        .push(ChatEntry::AssistantText(stdout.trim().to_string()));
+                }
+                if !stderr.trim().is_empty() {
+                    self.entries.push(ChatEntry::Error(stderr.trim().to_string()));
+                }
+                if stdout.trim().is_empty() && stderr.trim().is_empty() {
+                    self.entries
+                        .push(ChatEntry::Status("Command completed.".to_string()));
+                }
+            }
+            Err(e) => {
+                self.entries.push(ChatEntry::Error(format!(
+                    "Failed to run signet: {e}"
+                )));
+            }
         }
     }
 
@@ -566,7 +849,7 @@ impl App {
 
     async fn execute_command(&mut self, cmd: &crate::views::command_palette::CommandEntry) {
         match &cmd.kind {
-            CommandKind::BuiltIn(action) => match action.as_str() {
+            PaletteCommandKind::BuiltIn(action) => match action.as_str() {
                 "model_picker" => {
                     self.model_picker = Some(ModelPicker::new());
                 }
@@ -590,7 +873,7 @@ impl App {
                 }
                 _ => {}
             },
-            CommandKind::Skill(_content) => {
+            PaletteCommandKind::Skill(_content) => {
                 // Inject skill content as a system message for the next prompt
                 self.entries.push(ChatEntry::Status(format!(
                     "Skill /{} activated — type your prompt.",
@@ -649,25 +932,13 @@ impl App {
     async fn switch_model(&mut self, provider_name: &str, model: &str, context_window: usize) {
         // Resolve API key for the new provider
         let api_key = if provider_name == "ollama" {
-            "ollama".to_string()
-        } else if let Some(client) = &self.signet_client {
-            match resolve_api_key(client, provider_name).await {
+            String::new()
+        } else {
+            match resolve_api_key(self.signet_client.as_ref(), provider_name).await {
                 Ok(key) => key,
                 Err(e) => {
                     self.entries.push(ChatEntry::Error(format!(
-                        "Failed to resolve API key for {provider_name}: {e}"
-                    )));
-                    return;
-                }
-            }
-        } else {
-            // Try env var
-            let var_name = format!("{}_API_KEY", provider_name.to_uppercase());
-            match std::env::var(&var_name) {
-                Ok(key) if !key.is_empty() => key,
-                _ => {
-                    self.entries.push(ChatEntry::Error(format!(
-                        "No API key for {provider_name}. Set {var_name} or add to Signet secrets."
+                        "No API key for {provider_name}: {e}"
                     )));
                     return;
                 }
@@ -773,10 +1044,11 @@ impl App {
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::TextDelta(text) => {
+                if self.processing_phase != ProcessingPhase::Streaming {
+                    self.processing_phase = ProcessingPhase::Streaming;
+                }
                 self.streaming_text.push_str(&text);
-                // Cap streaming buffer at 512KB to prevent OOM on very long responses
                 if self.streaming_text.len() > 512 * 1024 {
-                    // Flush to entries and continue
                     self.entries
                         .push(ChatEntry::AssistantText(self.streaming_text.clone()));
                     self.streaming_text.clear();
@@ -784,6 +1056,7 @@ impl App {
                 self.scroll_offset = 0;
             }
             AgentEvent::ToolStart { name, .. } => {
+                self.processing_phase = ProcessingPhase::ExecutingTool(name.clone());
                 if !self.streaming_text.is_empty() {
                     self.entries
                         .push(ChatEntry::AssistantText(self.streaming_text.clone()));
@@ -829,19 +1102,33 @@ impl App {
                     self.streaming_text.clear();
                 }
                 self.processing = false;
+                self.processing_phase = ProcessingPhase::Idle;
             }
             AgentEvent::Error(msg) => {
                 self.streaming_text.clear();
                 self.entries.push(ChatEntry::Error(msg));
                 self.processing = false;
+                self.processing_phase = ProcessingPhase::Idle;
             }
             AgentEvent::Status(msg) => {
-                self.entries.push(ChatEntry::Status(msg));
+                // Update processing phase based on status message
+                if msg.contains("Recalling") {
+                    self.processing_phase = ProcessingPhase::RecallingMemories;
+                } else if msg.contains("Thinking") {
+                    self.processing_phase = ProcessingPhase::Thinking;
+                } else if msg.contains("Compacting") {
+                    self.processing_phase = ProcessingPhase::ExecutingTool("compaction".to_string());
+                }
+                // Don't push static status entries for animated phases
+                // — they're rendered as the activity line instead
             }
             AgentEvent::ToolApproval(_, name, _) => {
                 self.entries.push(ChatEntry::Status(format!(
                     "Waiting for approval: {name}..."
                 )));
+            }
+            AgentEvent::MemoryCount(count) => {
+                self.memories_injected = count;
             }
         }
     }
@@ -934,5 +1221,35 @@ impl App {
                 false
             }
         }
+    }
+}
+
+/// Parse memory count from Signet's injection response.
+/// Looks for "results=N" pattern or counts "- " prefixed memory lines.
+fn parse_memory_count(context: &str) -> usize {
+    // Try parsing "results=N" from Signet recall header
+    for segment in context.split('|') {
+        let trimmed = segment.trim();
+        if let Some(rest) = trimmed.strip_prefix("results=") {
+            if let Ok(n) = rest.trim().parse::<usize>() {
+                return n;
+            }
+        }
+    }
+
+    // Fallback: count lines starting with "- " (memory entries)
+    let entry_count = context
+        .lines()
+        .filter(|l| l.starts_with("- "))
+        .count();
+    if entry_count > 0 {
+        return entry_count;
+    }
+
+    // Last fallback: if there's any content, report at least 1
+    if !context.trim().is_empty() {
+        1
+    } else {
+        0
     }
 }
