@@ -573,6 +573,7 @@ impl App {
             total_memories: self.total_memories,
             effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
+            keybinds: &self.keybinds,
             status_bg: self.theme.status_bg,
             status_fg: self.theme.status_fg,
             accent: self.theme.accent,

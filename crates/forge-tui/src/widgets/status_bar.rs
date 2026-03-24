@@ -17,6 +17,7 @@ pub struct StatusBar<'a> {
     pub total_memories: usize,
     pub effort: &'a str,
     pub daemon_healthy: bool,
+    pub keybinds: &'a crate::keybinds::KeyBindConfig,
     pub status_bg: Color,
     pub status_fg: Color,
     pub accent: Color,
@@ -92,32 +93,26 @@ impl<'a> Widget for StatusBar<'a> {
             let border = Style::default().fg(self.muted);
             let key = Style::default().fg(self.accent);
             let label = Style::default().fg(self.status_fg);
-            let keys_line = Line::from(vec![
-                Span::styled(" [", border),
-                Span::styled("^O", key),
-                Span::styled(" Model", label),
-                Span::styled("] ", border),
-                Span::styled("[", border),
-                Span::styled("^K", key),
-                Span::styled(" Cmd", label),
-                Span::styled("] ", border),
-                Span::styled("[", border),
-                Span::styled("^D", key),
-                Span::styled(" Dashboard", label),
-                Span::styled("] ", border),
-                Span::styled("[", border),
-                Span::styled("^G", key),
-                Span::styled(" Signet", label),
-                Span::styled("] ", border),
-                Span::styled("[", border),
-                Span::styled("^C", key),
-                Span::styled(" Cancel", label),
-                Span::styled("] ", border),
-                Span::styled("[", border),
-                Span::styled("^Q", key),
-                Span::styled(" Quit", label),
-                Span::styled("]", border),
-            ]);
+
+            // (action_id, display_label) — reads actual bindings from config
+            let hints: &[(&str, &str)] = &[
+                ("model_picker", "Model"),
+                ("command_palette", "Cmd"),
+                ("dashboard", "Dashboard"),
+                ("signet_commands", "Signet"),
+                ("cancel", "Cancel"),
+                ("quit", "Quit"),
+            ];
+
+            let mut spans = vec![Span::styled(" ", border)];
+            for (action, name) in hints {
+                let combo = self.keybinds.get(action);
+                spans.push(Span::styled("[", border));
+                spans.push(Span::styled(combo.to_string(), key));
+                spans.push(Span::styled(format!(" {name}"), label));
+                spans.push(Span::styled("] ", border));
+            }
+            let keys_line = Line::from(spans);
 
             buf.set_line(area.x, area.y + 1, &keys_line, area.width);
             for x in area.x..area.x + area.width {
