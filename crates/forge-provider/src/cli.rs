@@ -201,10 +201,10 @@ impl Provider for CliProvider {
         let mut cmd = CommandBuilder::new(&self.cli_path);
         cmd.args(&args);
         cmd.env("SIGNET_NO_HOOKS", "1");
-        // Full terminal env — lets CLIs output colors, spinners, and prompts
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("FORCE_COLOR", "1");
+        // PTY gives us line-buffered output (the real win), but we parse JSON
+        // so suppress colors/interactive features that break JSON parsing
+        cmd.env("TERM", "dumb");
+        cmd.env("NO_COLOR", "1");
         cmd.env("LANG", "en_US.UTF-8");
 
         let mut child = pair
