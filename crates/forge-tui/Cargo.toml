@@ -1,0 +1,22 @@
+[package]
+name = "forge-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+forge-core = { workspace = true }
+forge-agent = { workspace = true }
+forge-provider = { workspace = true }
+forge-signet = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+pulldown-cmark = { workspace = true }
+syntect = { workspace = true }
+arboard = { workspace = true }
+tracing = { workspace = true }

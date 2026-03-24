@@ -1,0 +1,86 @@
+pub mod anthropic;
+pub mod streaming;
+
+use async_trait::async_trait;
+use forge_core::{ForgeError, Message, ToolDefinition, TokenUsage};
+use std::pin::Pin;
+use tokio_stream::Stream;
+
+/// Events emitted by a provider during streaming completion
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// Incremental text content
+    TextDelta(String),
+    /// A tool use block has started
+    ToolUseStart { id: String, name: String },
+    /// Incremental JSON input for the current tool call
+    ToolUseInput(String),
+    /// The current tool use block is complete
+    ToolUseEnd,
+    /// Token usage statistics
+    Usage(TokenUsage),
+    /// Stream is complete
+    Done,
+    /// An error occurred during streaming
+    Error(String),
+}
+
+/// A stream of completion events
+pub type CompletionStream = Pin<Box<dyn Stream<Item = StreamEvent> + Send>>;
+
+/// Options for a completion request
+#[derive(Debug, Clone, Default)]
+pub struct CompletionOpts {
+    pub max_tokens: Option<usize>,
+    pub temperature: Option<f64>,
+    pub system_prompt: Option<String>,
+    /// For models that support extended thinking / reasoning
+    pub thinking: Option<ThinkingConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThinkingConfig {
+    pub enabled: bool,
+    pub budget_tokens: Option<usize>,
+}
+
+/// The core provider trait — each AI provider implements this
+#[async_trait]
+pub trait Provider: Send + Sync {
+    /// Provider name (e.g., "anthropic", "openai")
+    fn name(&self) -> &str;
+
+    /// Current model ID (e.g., "claude-sonnet-4-6")
+    fn model(&self) -> &str;
+
+    /// Context window size in tokens
+    fn context_window(&self) -> usize;
+
+    /// Send a completion request and get a streaming response
+    async fn complete(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+        opts: &CompletionOpts,
+    ) -> Result<CompletionStream, ForgeError>;
+
+    /// Check if the provider is available (API key set, endpoint reachable)
+    async fn available(&self) -> bool;
+}
+
+/// Create a provider by name
+pub fn create_provider(
+    provider_name: &str,
+    model: &str,
+    api_key: &str,
+) -> Result<Box<dyn Provider>, ForgeError> {
+    match provider_name {
+        "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(
+            model.to_string(),
+            api_key.to_string(),
+        ))),
+        other => Err(ForgeError::provider(format!(
+            "Unknown provider: {other}. Available: anthropic"
+        ))),
+    }
+}

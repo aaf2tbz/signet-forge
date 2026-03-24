@@ -1,0 +1,16 @@
+[package]
+name = "forge-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+forge-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+glob = { workspace = true }
+regex-lite = { workspace = true }
+tracing = { workspace = true }
