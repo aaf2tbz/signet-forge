@@ -771,7 +771,8 @@ impl App {
                 if let Some(picker) = &self.command_picker {
                     if let Some(cmd) = picker.selected_command() {
                         self.command_picker = None;
-                        self.execute_signet_command(&cmd).await;
+                        // Route through slash command handler so Internal commands work
+                        self.handle_slash_command(&format!("/{}", cmd.key)).await;
                     }
                 }
             }
