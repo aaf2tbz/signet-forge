@@ -1203,6 +1203,7 @@ impl App {
                                 self.entries.push(ChatEntry::Status(format!(
                                     "Effort set to: {}", new_effort.as_str()
                                 )));
+                                self.save_settings();
                             }
                         }
                         "forge-bypass" => {
@@ -1221,6 +1222,7 @@ impl App {
                             self.entries.push(ChatEntry::Status(format!(
                                 "Permission bypass: {state}{detail}"
                             )));
+                            self.save_settings();
                         }
                         _ => {}
                     }
@@ -1546,7 +1548,23 @@ impl App {
             model, provider_name
         )));
 
+        // Persist model choice
+        self.save_settings();
         info!("Model switched to {model} ({provider_name})");
+    }
+
+    fn save_settings(&self) {
+        let effort = self.effort.try_lock().map(|e| e.as_str().to_string()).ok();
+        let bypass = self.bypass.try_lock().map(|b| *b).unwrap_or(false);
+        let settings = crate::settings::Settings {
+            model: Some(self.model.clone()),
+            provider: Some(self.provider_name.clone()),
+            cli_path: self.cli_path.clone(),
+            effort,
+            theme: Some(self.theme.name.to_string()),
+            bypass,
+        };
+        settings.save();
     }
 
     async fn handle_permission_key(&mut self, key: crossterm::event::KeyEvent) {
@@ -1743,6 +1761,11 @@ impl App {
                 info!("Session-end hook failed (non-fatal): {e}");
             }
         }
+    }
+
+    /// Expose effort Arc for external initialization (e.g., from saved settings)
+    pub fn effort_mut(&self) -> &Arc<Mutex<forge_provider::ReasoningEffort>> {
+        &self.effort
     }
 
     /// Load a previous session from SQLite (for --resume)

@@ -111,8 +111,27 @@ async fn main() -> Result<()> {
     // Discover available providers — API keys, CLI tools, local models
     let available = discover_available_providers(signet_client.as_ref()).await;
 
+    // Load persistent settings (model, provider, effort from last session)
+    let settings = forge_tui::settings::Settings::load();
+
+    // Extract prompt before consuming cli in defaults
+    let prompt_arg = cli.prompt.clone();
+    let resume_arg = cli.resume;
+
+    // Apply saved settings as defaults when CLI args not explicitly provided
+    let cli_with_defaults = Cli {
+        model: cli.model.clone().or(settings.model),
+        provider: cli.provider.clone().or(settings.provider),
+        theme: if cli.theme == "signet-dark" {
+            settings.theme.unwrap_or_else(|| cli.theme.clone())
+        } else {
+            cli.theme.clone()
+        },
+        ..cli
+    };
+
     // Determine provider and model
-    let (provider_name, model) = select_provider(&cli, &available)?;
+    let (provider_name, model) = select_provider(&cli_with_defaults, &available)?;
 
     info!("Forge starting — provider: {provider_name}, model: {model}");
 
@@ -161,15 +180,23 @@ async fn main() -> Result<()> {
     };
 
     // Non-interactive mode: send prompt, print response, exit
-    if let Some(prompt) = cli.prompt {
+    if let Some(prompt) = prompt_arg {
         return run_non_interactive(provider, signet_client, system_prompt, &prompt).await;
     }
 
     // Interactive TUI mode
     let mut terminal = ratatui::init();
-    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path, &cli.theme).await;
+    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path, &cli_with_defaults.theme).await;
 
-    if cli.resume {
+    // Apply saved effort from settings
+    if let Some(ref effort_str) = settings.effort {
+        let effort = forge_provider::ReasoningEffort::parse(effort_str);
+        if effort != forge_provider::ReasoningEffort::Medium {
+            *app.effort_mut().lock().await = effort;
+        }
+    }
+
+    if resume_arg {
         app.resume_last_session().await;
     }
 
