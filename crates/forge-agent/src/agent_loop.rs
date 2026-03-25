@@ -4,7 +4,7 @@ use crate::session::SharedSession;
 use forge_core::{Message, MessageContent, ToolCall, ToolDefinition, TokenUsage};
 use forge_provider::{CompletionOpts, Provider, ReasoningEffort, StreamEvent};
 use forge_signet::hooks::SessionHooks;
-use forge_tools;
+use forge_tools::{self, Tool as _};
 use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -76,8 +76,12 @@ impl AgentLoop {
     ) -> Self {
         let context_window = provider.context_window();
         let tool_definitions = match &daemon_url {
-            Some(url) => forge_tools::all_definitions_with_signet(url),
-            None => forge_tools::all_definitions(),
+            Some(url) => forge_tools::all_definitions_with_subagent(url, Arc::clone(&provider)),
+            None => {
+                let mut defs = forge_tools::all_definitions();
+                defs.push(forge_tools::subagent::SubAgentTool::new(Arc::clone(&provider)).definition());
+                defs
+            }
         };
         // MCP tool definitions are added later via async refresh
         let _ = &mcp_clients; // suppress unused warning until async init
@@ -328,8 +332,23 @@ impl AgentLoop {
             let mut tool_results_content = Vec::new();
             for tc in &tool_calls {
                 let tool_impl = match &self.daemon_url {
-                    Some(url) => forge_tools::find_tool_with_signet(&tc.name, url),
-                    None => forge_tools::find_tool(&tc.name),
+                    Some(url) => forge_tools::find_tool_with_subagent(
+                        &tc.name,
+                        url,
+                        Arc::clone(&self.provider),
+                    ),
+                    None => {
+                        // Check built-in tools first, then SubAgent
+                        forge_tools::find_tool(&tc.name).or_else(|| {
+                            if tc.name == "SubAgent" {
+                                Some(Box::new(forge_tools::subagent::SubAgentTool::new(
+                                    Arc::clone(&self.provider),
+                                )))
+                            } else {
+                                None
+                            }
+                        })
+                    }
                 };
                 let permission_level = tool_impl
                     .as_ref()

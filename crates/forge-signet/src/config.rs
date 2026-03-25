@@ -205,6 +205,72 @@ pub fn agent_name() -> String {
         .unwrap_or_else(|| "Assistant".to_string())
 }
 
+/// Get the agent_id for daemon API calls.
+/// Returns the agent name lowercased, or "default" if no name is found.
+pub fn agent_id() -> String {
+    let name = agent_name();
+    if name == "Assistant" {
+        "default".to_string()
+    } else {
+        name.to_lowercase()
+    }
+}
+
+/// Load identity files for a specific named agent.
+/// Checks `~/.agents/agents/{name}/` first, falls back to root `~/.agents/`.
+pub fn load_agent_identity_files(agent_name: &str) -> Vec<(String, String)> {
+    let agent_dir = agents_dir().join("agents").join(agent_name);
+    let root_dir = agents_dir();
+    let files = ["SOUL.md", "IDENTITY.md", "USER.md", "AGENTS.md"];
+    let mut loaded = Vec::new();
+
+    for name in &files {
+        let agent_path = agent_dir.join(name);
+        let root_path = root_dir.join(name);
+
+        let content = if agent_path.exists() {
+            debug!(
+                "Loading per-agent identity file: {}/{}",
+                agent_name, name
+            );
+            std::fs::read_to_string(&agent_path).ok()
+        } else if root_path.exists() {
+            debug!(
+                "Falling back to root identity file: {}",
+                name
+            );
+            std::fs::read_to_string(&root_path).ok()
+        } else {
+            None
+        };
+
+        if let Some(text) = content {
+            loaded.push((name.to_string(), text));
+        }
+    }
+
+    loaded
+}
+
+/// Build the system prompt from per-agent identity files (with root fallback)
+pub fn build_agent_identity_prompt(agent_name: &str) -> String {
+    let files = load_agent_identity_files(agent_name);
+    let mut parts = Vec::new();
+
+    for (name, content) in &files {
+        let section = match name.as_str() {
+            "AGENTS.md" => "Agent Instructions",
+            "SOUL.md" => "Soul",
+            "IDENTITY.md" => "Identity",
+            "USER.md" => "About Your User",
+            _ => continue,
+        };
+        parts.push(format!("## {section}\n\n{content}"));
+    }
+
+    parts.join("\n\n")
+}
+
 /// Build the system prompt from Signet identity files
 pub fn build_identity_prompt() -> String {
     let mut parts = Vec::new();

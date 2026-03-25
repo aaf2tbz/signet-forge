@@ -68,6 +68,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             kind: CommandKind::Internal("resume"),
         },
         SignetCommand {
+            key: "import-claude",
+            label: "/import-claude",
+            description: "Import conversation history from Claude Code",
+            kind: CommandKind::Internal("import-claude"),
+        },
+        SignetCommand {
             key: "dashboard",
             label: "/dashboard",
             description: "Open Signet dashboard in browser",
@@ -102,6 +108,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             label: "/extraction-model <model>",
             description: "View or change the Signet extraction pipeline model",
             kind: CommandKind::Internal("extraction-model"),
+        },
+        SignetCommand {
+            key: "agent",
+            label: "/agent",
+            description: "Show current agent identity and ID",
+            kind: CommandKind::Internal("agent"),
         },
         // Status & Diagnostics
         SignetCommand {

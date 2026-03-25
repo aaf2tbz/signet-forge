@@ -5,12 +5,14 @@ edition.workspace = true
 
 [dependencies]
 forge-core = { workspace = true }
+forge-provider = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+futures = { workspace = true }
 glob = { workspace = true }
 regex-lite = { workspace = true }
 tracing = { workspace = true }

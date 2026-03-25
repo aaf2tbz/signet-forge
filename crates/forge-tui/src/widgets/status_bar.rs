@@ -17,6 +17,8 @@ pub struct StatusBar<'a> {
     pub total_memories: usize,
     pub effort: &'a str,
     pub daemon_healthy: bool,
+    /// Current agent name (None = default)
+    pub active_agent: Option<&'a str>,
     pub keybinds: &'a crate::keybinds::KeyBindConfig,
     pub status_bg: Color,
     pub status_fg: Color,
@@ -40,8 +42,18 @@ impl<'a> Widget for StatusBar<'a> {
             Span::styled("●", Style::default().fg(self.error))
         };
 
+        let agent_span = if let Some(agent) = self.active_agent {
+            Span::styled(
+                format!("[{agent}] "),
+                Style::default().fg(self.accent),
+            )
+        } else {
+            Span::styled("", Style::default())
+        };
+
         let info_line = Line::from(vec![
             Span::styled(" [Forge] ", Style::default().fg(self.accent)),
+            agent_span,
             Span::styled(
                 format!("{} ({}) ", self.model, self.provider),
                 Style::default().fg(self.status_fg),

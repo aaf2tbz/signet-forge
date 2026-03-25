@@ -200,6 +200,8 @@ pub struct App {
     pipeline_info: String,
     /// Agent display name from IDENTITY.md
     agent_name: String,
+    /// Explicit --agent CLI flag value (None = default agent)
+    active_agent: Option<String>,
     /// Live daemon log lines (ring buffer, max 100)
     daemon_logs: Vec<String>,
 }
@@ -227,6 +229,7 @@ impl App {
         system_prompt: String,
         cli_path: Option<String>,
         theme_name: &str,
+        active_agent: Option<String>,
     ) -> Self {
         let model = provider.model().to_string();
         let provider_name = provider.name().to_string();
@@ -385,6 +388,7 @@ impl App {
             session_store,
             pipeline_info,
             agent_name: forge_signet::config::agent_name(),
+            active_agent,
             daemon_logs: Vec::new(),
             speculative_query: String::new(),
             speculative_handle: None,
@@ -654,6 +658,7 @@ impl App {
             total_memories: self.total_memories,
             effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
+            active_agent: self.active_agent.as_deref(),
             keybinds: &self.keybinds,
             status_bg: self.theme.status_bg,
             status_fg: self.theme.status_fg,
@@ -1460,6 +1465,14 @@ impl App {
                                 self.save_settings();
                             }
                         }
+                        "agent" => {
+                            let agent_display = self.active_agent.as_deref().unwrap_or("default");
+                            let agent_id = forge_signet::config::agent_id();
+                            self.entries.push(ChatEntry::Status(format!(
+                                "Agent: {} (id: {}, name: {})",
+                                agent_display, agent_id, self.agent_name
+                            )));
+                        }
                         "forge-bypass" => {
                             let mut b = self.bypass.lock().await;
                             *b = !*b;
@@ -1477,6 +1490,37 @@ impl App {
                                 "Permission bypass: {state}{detail}"
                             )));
                             self.save_settings();
+                        }
+                        "import-claude" => {
+                            self.entries.push(ChatEntry::Status(
+                                "Importing sessions from Claude Code...".to_string(),
+                            ));
+                            match &self.session_store {
+                                Some(store) => match store.import_claude_sessions() {
+                                    Ok((imported, skipped)) => {
+                                        if imported == 0 && skipped == 0 {
+                                            self.entries.push(ChatEntry::Status(
+                                                "No Claude Code sessions found to import.".to_string(),
+                                            ));
+                                        } else {
+                                            self.entries.push(ChatEntry::Status(format!(
+                                                "Imported {imported} session{} from Claude Code ({skipped} already existed).",
+                                                if imported == 1 { "" } else { "s" }
+                                            )));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.entries.push(ChatEntry::Error(format!(
+                                            "Import failed: {e}"
+                                        )));
+                                    }
+                                },
+                                None => {
+                                    self.entries.push(ChatEntry::Error(
+                                        "Session store not available.".to_string(),
+                                    ));
+                                }
+                            }
                         }
                         _ => {}
                     }

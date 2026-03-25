@@ -8,7 +8,7 @@ use crossterm::{
     terminal,
 };
 use forge_provider::create_provider;
-use forge_signet::config::{build_identity_prompt, load_agent_config};
+use forge_signet::config::{build_agent_identity_prompt, build_identity_prompt, load_agent_config};
 use forge_signet::secrets::{
     default_model_for_provider, discover_available_providers, resolve_api_key, DiscoveredProvider,
     KeySource,
@@ -49,6 +49,10 @@ struct Cli {
     /// Color theme (signet-dark, signet-light, midnight, amber)
     #[arg(long, default_value = "signet-dark")]
     theme: String,
+
+    /// Agent name (uses per-agent identity files from ~/.agents/agents/<name>/)
+    #[arg(long)]
+    agent: Option<String>,
 }
 
 #[tokio::main]
@@ -95,7 +99,11 @@ async fn main() -> Result<()> {
         warn!("Running without Signet daemon — memory and identity disabled");
         None
     } else {
-        let client = SignetClient::new(&cli.daemon_url);
+        let mut client = SignetClient::new(&cli.daemon_url);
+        if let Some(ref agent_name) = cli.agent {
+            client = client.with_agent(&agent_name.to_lowercase());
+            info!("Agent mode: {} (id: {})", agent_name, agent_name.to_lowercase());
+        }
         if client.is_available().await {
             info!("Connected to Signet daemon at {}", cli.daemon_url);
             Some(client)
@@ -114,9 +122,10 @@ async fn main() -> Result<()> {
     // Load persistent settings (model, provider, effort from last session)
     let settings = forge_tui::settings::Settings::load();
 
-    // Extract prompt before consuming cli in defaults
+    // Extract values before consuming cli in defaults
     let prompt_arg = cli.prompt.clone();
     let resume_arg = cli.resume;
+    let agent_arg = cli.agent.clone();
 
     // Apply saved settings as defaults when CLI args not explicitly provided
     let cli_with_defaults = Cli {
@@ -169,8 +178,18 @@ async fn main() -> Result<()> {
         Arc::from(create_provider(&provider_name, &model, &api_key)?)
     };
 
-    // Build system prompt from Signet identity files
-    let identity_prompt = build_identity_prompt();
+    // Build system prompt from Signet identity files (per-agent if --agent set)
+    let identity_prompt = if let Some(ref agent_name) = agent_arg {
+        let prompt = build_agent_identity_prompt(agent_name);
+        if prompt.is_empty() {
+            info!("No per-agent identity files for '{}', falling back to root", agent_name);
+            build_identity_prompt()
+        } else {
+            prompt
+        }
+    } else {
+        build_identity_prompt()
+    };
     let system_prompt = if identity_prompt.is_empty() {
         "You are Forge, a helpful AI coding assistant running in a terminal. \
          Help the user with software engineering tasks."
@@ -186,7 +205,7 @@ async fn main() -> Result<()> {
 
     // Interactive TUI mode
     let mut terminal = ratatui::init();
-    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path, &cli_with_defaults.theme).await;
+    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path, &cli_with_defaults.theme, agent_arg).await;
 
     // Apply saved effort from settings
     if let Some(ref effort_str) = settings.effort {
