@@ -24,4 +24,4 @@ dirs = { workspace = true }
 png = { workspace = true }
 unicode-width = "0.2"
 reqwest-eventsource.workspace = true
-forge-mcp = { version = "0.6.0", path = "../forge-mcp" }
+forge-mcp = { workspace = true }
