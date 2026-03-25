@@ -1,11 +1,11 @@
 use crate::theme::Theme;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 use syntect::easy::HighlightLines;
-use syntect::highlighting::ThemeSet;
+use syntect::highlighting::{FontStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use std::sync::LazyLock;
 
@@ -38,8 +38,14 @@ fn highlight_code(code: &str, lang: &str, theme: &Theme) -> Vec<Vec<Span<'static
                 let spans: Vec<Span<'static>> = ranges
                     .into_iter()
                     .map(|(style, text)| {
-                        let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
-                        Span::styled(text.to_string(), Style::default().fg(fg))
+                        let mut span_style = Style::default().fg(theme.code);
+                        if style.font_style.contains(FontStyle::BOLD) {
+                            span_style = span_style.add_modifier(Modifier::BOLD);
+                        }
+                        if style.font_style.contains(FontStyle::ITALIC) {
+                            span_style = span_style.add_modifier(Modifier::ITALIC);
+                        }
+                        Span::styled(text.to_string(), span_style)
                     })
                     .collect();
                 result.push(spans);

@@ -208,7 +208,7 @@ impl DashboardNav {
                     .add_modifier(Modifier::BOLD),
             )
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border));
+            .border_style(Style::default().fg(theme.accent));
 
         let inner = block.inner(popup);
         block.render(popup, buf);

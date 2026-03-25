@@ -56,40 +56,40 @@ enum ProcessingPhase {
 }
 
 impl ProcessingPhase {
-    /// Spinner frames — Signet-themed geometric sequence
-    const FRAMES: &[&str] = &["◇", "◈", "◆", "◈"];
+    /// Spinner frames — subtle technical sweep instead of chunky hops
+    const FRAMES: &[&str] = &["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"];
 
     /// Contextual verbs that cycle based on tick for each phase.
     /// tick/80 ≈ 4 seconds per verb at 50ms frame rate.
     fn label(&self, tick: usize) -> &'static str {
         match self {
-            Self::Idle | Self::Streaming => "",
+            Self::Idle => "",
+            Self::Streaming => "Responding",
             Self::RecallingMemories => {
                 const VERBS: &[&str] = &[
-                    "Remembering", "Recalling", "Ruminating",
-                    "Investigating", "Exploring", "Traveling",
+                    "Remembering", "Recalling", "Tracing",
+                    "Searching", "Linking", "Surfacing",
                 ];
                 VERBS[(tick / 80) % VERBS.len()]
             }
             Self::Thinking => {
                 const VERBS: &[&str] = &[
-                    "Thinking", "Deliberating", "Hypothesizing",
-                    "Riddling", "Constructing", "Squandering",
-                    "Galloping", "Fiddling",
+                    "Thinking", "Deliberating", "Reasoning",
+                    "Synthesizing", "Constructing", "Shaping",
                 ];
                 VERBS[(tick / 80) % VERBS.len()]
             }
             Self::Planning => {
                 const VERBS: &[&str] = &[
-                    "Planning", "Tinkering", "Exploring",
-                    "Investigating", "Deliberating", "Constructing",
+                    "Planning", "Structuring", "Mapping",
+                    "Sequencing", "Investigating", "Constructing",
                 ];
                 VERBS[(tick / 80) % VERBS.len()]
             }
             Self::Writing => {
                 const VERBS: &[&str] = &[
-                    "Writing", "Composing", "Crafting",
-                    "Tinkering", "Building", "Fiddling",
+                    "Writing", "Composing", "Drafting",
+                    "Refining", "Building", "Editing",
                 ];
                 VERBS[(tick / 80) % VERBS.len()]
             }
@@ -99,15 +99,21 @@ impl ProcessingPhase {
 
     fn render(&self, tick: usize) -> String {
         let frame = Self::FRAMES[tick % Self::FRAMES.len()];
+        let trail = match (tick / 2) % 6 {
+            0 => "·    ",
+            1 => "··   ",
+            2 => "···  ",
+            3 => " ··· ",
+            4 => "  ···",
+            _ => "   ··",
+        };
         match self {
-            Self::Idle | Self::Streaming => String::new(),
+            Self::Idle => String::new(),
             Self::ExecutingTool(name) => {
-                let dots = ".".repeat((tick / 4) % 4);
-                format!("  {frame} {} {name}{dots}", self.label(tick))
+                format!("  {frame} {} {name}  {trail}", self.label(tick))
             }
             _ => {
-                let dots = ".".repeat((tick / 4) % 4);
-                format!("  {frame} {}{dots}", self.label(tick))
+                format!("  {frame} {}  {trail}", self.label(tick))
             }
         }
     }
@@ -947,7 +953,7 @@ impl App {
         } else if self.voice_recording {
             let dots = ".".repeat((self.tick / 4) % 4);
             Some(format!("  ● Recording{dots} (Ctrl+R to stop)"))
-        } else if self.processing && self.processing_phase != ProcessingPhase::Streaming {
+        } else if self.processing {
             let rendered = self.processing_phase.render(self.tick);
             if rendered.is_empty() { None } else { Some(rendered) }
         } else {
@@ -971,7 +977,7 @@ impl App {
 
         let input_block = Block::default()
             .borders(Borders::TOP)
-            .border_style(Style::default().fg(self.theme.border));
+            .border_style(Style::default().fg(self.theme.accent));
 
         let input_text = if self.input.is_empty() && self.voice_interim_text.is_empty() {
             let placeholder = if self.voice_recording {

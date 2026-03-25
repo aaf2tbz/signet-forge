@@ -267,7 +267,7 @@ impl<'a> Widget for ChatView<'a> {
                                 let rest = display[colon..].to_string();
                                 lines.push(Line::from(vec![
                                     Span::styled("      │ ", Style::default().fg(t.border)),
-                                    Span::styled(file_part, Style::default().fg(t.accent)),
+                                    Span::styled(file_part, Style::default().fg(t.fg_bright)),
                                     Span::styled(rest, style),
                                 ]));
                                 continue;
@@ -329,15 +329,16 @@ impl<'a> Widget for ChatView<'a> {
                 indented_spans.extend(md_line.spans);
                 lines.push(Line::from(indented_spans));
             }
-            // Blinking cursor — toggles every ~500ms (10 ticks at 50ms)
-            if (self.tick / 10).is_multiple_of(2) {
-                lines.push(Line::from(Span::styled(
-                    "    ●",
-                    Style::default().fg(t.accent),
-                )));
-            } else {
-                lines.push(Line::from(""));
-            }
+            // Streaming cursor — tighter and less jumpy than a full blink dot
+            let cursor = match self.tick % 6 {
+                0 | 1 => "▏",
+                2 | 3 => "▎",
+                _ => "▍",
+            };
+            lines.push(Line::from(Span::styled(
+                format!("    {cursor}"),
+                Style::default().fg(t.spinner),
+            )));
         }
 
         // Activity indicator (animated spinner during processing)

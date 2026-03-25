@@ -65,31 +65,31 @@ impl Theme {
             fg_bright: Color::Rgb(240, 240, 242),
             // --color-text-muted: #3e3e46
             muted: Color::Rgb(62, 62, 70),
-            // --color-accent: #8a8a96
-            accent: Color::Rgb(138, 138, 150),
+            // Signet yellow highlight token
+            accent: Color::Rgb(214, 189, 96),
             // User messages — slightly brighter than accent
             user: Color::Rgb(192, 192, 200),
             // Assistant streaming cursor — accent-hover: #c0c0c8
             assistant: Color::Rgb(192, 192, 200),
-            // Tool brackets — accent
-            tool: Color::Rgb(138, 138, 150),
+            // Tool brackets — restrained chrome accent
+            tool: Color::Rgb(184, 168, 112),
             // --color-success: #4a7a5e
             success: Color::Rgb(74, 122, 94),
             // --color-danger: #8a4a48
             error: Color::Rgb(138, 74, 72),
-            // Warning — between accent and danger
-            warning: Color::Rgb(180, 160, 80),
+            // Warning — yellow-leaning but darker than glow
+            warning: Color::Rgb(188, 156, 72),
             // Code blocks — bright text
             code: Color::Rgb(240, 240, 242),
-            // --color-border: rgba(255,255,255,0.06) ≈ RGB(15,15,15) on #08080a
-            border: Color::Rgb(30, 30, 34),
+            // Dim Signet-yellow border for thinner-feeling chrome
+            border: Color::Rgb(88, 74, 36),
             // Dialog background — surface
             dialog_bg: Color::Rgb(14, 14, 18),
-            // Selected — accent-hover on accent bg
-            selected_bg: Color::Rgb(138, 138, 150),
+            // Selected rows use the Signet highlight token
+            selected_bg: Color::Rgb(214, 189, 96),
             selected_fg: Color::Rgb(8, 8, 10),
-            // Neon yellow-green — Signet homepage loading animation
-            spinner: Color::Rgb(180, 255, 80),
+            // Signet glow token for motion/loading
+            spinner: Color::Rgb(244, 225, 129),
         }
     }
 
@@ -111,14 +111,14 @@ impl Theme {
             fg_bright: Color::Rgb(10, 10, 12),
             // --color-text-muted: #7a756e
             muted: Color::Rgb(122, 117, 110),
-            // --color-accent: #6a6660
-            accent: Color::Rgb(106, 102, 96),
+            // Signet yellow highlight token adapted for light theme
+            accent: Color::Rgb(145, 117, 32),
             // User messages — near-black for readability
             user: Color::Rgb(42, 42, 46),
             // Assistant — accent-hover: #3a3832
             assistant: Color::Rgb(58, 56, 50),
-            // Tool brackets — accent
-            tool: Color::Rgb(106, 102, 96),
+            // Tool brackets — restrained chrome accent
+            tool: Color::Rgb(132, 112, 56),
             // --color-success: #4a7a5e (same both modes)
             success: Color::Rgb(74, 122, 94),
             // --color-danger: #8a4a48 (same both modes)
@@ -127,15 +127,15 @@ impl Theme {
             warning: Color::Rgb(160, 120, 50),
             // Code — bright text (near-black)
             code: Color::Rgb(10, 10, 12),
-            // --color-border: rgba(0,0,0,0.06) ≈ RGB(214,209,203) on #e4dfd8
-            border: Color::Rgb(190, 185, 178),
+            // Dim Signet-yellow border for light theme surfaces
+            border: Color::Rgb(186, 168, 118),
             // Dialog — surface
             dialog_bg: Color::Rgb(219, 213, 205),
-            // Selected
-            selected_bg: Color::Rgb(106, 102, 96),
+            // Selected rows use the Signet highlight token
+            selected_bg: Color::Rgb(145, 117, 32),
             selected_fg: Color::Rgb(228, 223, 216),
-            // Neon yellow-green — toned for light bg
-            spinner: Color::Rgb(80, 160, 40),
+            // Signet glow token toned for light bg
+            spinner: Color::Rgb(166, 132, 38),
         }
     }
 
@@ -150,19 +150,19 @@ impl Theme {
             status_fg: Color::Rgb(180, 190, 220),
             fg_bright: Color::Rgb(230, 235, 250),
             muted: Color::Rgb(80, 90, 110),
-            accent: Color::Rgb(100, 150, 255),
+            accent: Color::Rgb(214, 189, 96),
             user: Color::Rgb(100, 150, 255),
             assistant: Color::Rgb(80, 200, 120),
-            tool: Color::Rgb(180, 130, 255),
+            tool: Color::Rgb(184, 168, 112),
             success: Color::Rgb(80, 200, 120),
             error: Color::Rgb(255, 100, 100),
             warning: Color::Rgb(255, 200, 80),
             code: Color::Rgb(80, 200, 120),
-            border: Color::Rgb(50, 60, 80),
+            border: Color::Rgb(88, 74, 36),
             dialog_bg: Color::Rgb(20, 25, 45),
-            selected_bg: Color::Rgb(100, 150, 255),
+            selected_bg: Color::Rgb(214, 189, 96),
             selected_fg: Color::Rgb(10, 12, 22),
-            spinner: Color::Rgb(80, 255, 120),
+            spinner: Color::Rgb(244, 225, 129),
         }
     }
 
@@ -177,19 +177,19 @@ impl Theme {
             status_fg: Color::Rgb(255, 180, 50),
             fg_bright: Color::Rgb(255, 230, 160),
             muted: Color::Rgb(120, 100, 60),
-            accent: Color::Rgb(255, 180, 50),
+            accent: Color::Rgb(214, 189, 96),
             user: Color::Rgb(255, 180, 50),
             assistant: Color::Rgb(255, 220, 130),
-            tool: Color::Rgb(200, 150, 50),
+            tool: Color::Rgb(198, 176, 106),
             success: Color::Rgb(200, 255, 100),
             error: Color::Rgb(255, 80, 50),
             warning: Color::Rgb(255, 200, 50),
             code: Color::Rgb(255, 220, 130),
-            border: Color::Rgb(80, 65, 30),
+            border: Color::Rgb(110, 86, 34),
             dialog_bg: Color::Rgb(25, 20, 10),
-            selected_bg: Color::Rgb(255, 180, 50),
+            selected_bg: Color::Rgb(214, 189, 96),
             selected_fg: Color::Rgb(15, 12, 5),
-            spinner: Color::Rgb(255, 220, 50),
+            spinner: Color::Rgb(244, 225, 129),
         }
     }
 
