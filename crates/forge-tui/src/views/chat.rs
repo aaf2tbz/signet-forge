@@ -212,9 +212,7 @@ impl<'a> Widget for ChatView<'a> {
             }
         }
 
-        // Auto-scroll with +2 safety buffer to account for wrap estimation drift.
-
-        // Estimate total wrapped lines — used for both auto-scroll and scroll-up
+        // Estimate total wrapped lines for scroll calculation.
         use unicode_width::UnicodeWidthStr;
         let width = area.width as usize;
         let total: u16 = if width == 0 {
@@ -222,9 +220,8 @@ impl<'a> Widget for ChatView<'a> {
         } else {
             lines.iter().map(|line| {
                 let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
-                // Add 1 for safety margin per line (accounts for ratatui wrap differences)
                 1u16.max(w.div_ceil(width) as u16)
-            }).sum::<u16>().saturating_add(2) // +2 buffer for rounding
+            }).sum()
         };
 
         let scroll = if self.scroll_offset == 0 {
