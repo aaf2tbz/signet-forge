@@ -267,6 +267,26 @@ fn codex_auth_file_has_tokens() -> bool {
     false
 }
 
+fn gemini_persisted_auth_exists() -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+
+    let candidates = [
+        home.join(".gemini").join("antigravity").join("installation_id"),
+        home.join(".gemini")
+            .join("antigravity-browser-profile")
+            .join("Default")
+            .join("Login Data"),
+        home.join(".gemini")
+            .join("antigravity-browser-profile")
+            .join("Default")
+            .join("Cookies"),
+    ];
+
+    candidates.iter().any(|path| path.exists())
+}
+
 fn sync_codex_auth_file_from_env() -> Result<(), ForgeError> {
     let auth_mode = std::env::var("CODEX_AUTH_MODE").ok();
     let access_token = std::env::var("CODEX_ACCESS_TOKEN").ok();
@@ -455,6 +475,10 @@ async fn detect_cli_auth(provider_name: &str, binary: &str) -> Option<String> {
             }
         }
         "gemini-cli" => {
+            if gemini_persisted_auth_exists() {
+                return Some("logged in".to_string());
+            }
+
             for env_name in cli_env_keys(provider_name) {
                 if std::env::var(env_name)
                     .ok()
