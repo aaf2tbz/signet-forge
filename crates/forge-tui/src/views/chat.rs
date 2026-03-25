@@ -212,27 +212,26 @@ impl<'a> Widget for ChatView<'a> {
             }
         }
 
-        // Calculate wrapped line count — each Line may span multiple visual rows.
-        // Use Unicode display width (not byte count) so emoji and CJK are correct.
+        // Auto-scroll: when following the bottom (scroll_offset == 0), use u16::MAX.
+        // Ratatui clamps scroll to actual content height, so this always shows the
+        // latest content — no manual line count estimation needed.
+        // When user scrolls up, estimate wrapped height for offset math.
         use unicode_width::UnicodeWidthStr;
-        let width = area.width as usize;
-        let total_lines: u16 = if width == 0 {
-            lines.len() as u16
-        } else {
-            lines
-                .iter()
-                .map(|line| {
-                    let content_width: usize = line.spans.iter().map(|s| s.content.width()).sum();
-                    1u16.max(content_width.div_ceil(width) as u16)
-                })
-                .sum()
-        };
-        let visible_lines = area.height;
+
         let scroll = if self.scroll_offset == 0 {
-            total_lines.saturating_sub(visible_lines)
+            u16::MAX
         } else {
-            total_lines
-                .saturating_sub(visible_lines)
+            let width = area.width as usize;
+            let total: u16 = if width == 0 {
+                lines.len() as u16
+            } else {
+                lines.iter().map(|line| {
+                    let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
+                    1u16.max(w.div_ceil(width) as u16)
+                }).sum()
+            };
+            total
+                .saturating_sub(area.height)
                 .saturating_sub(self.scroll_offset)
         };
 
