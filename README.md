@@ -278,7 +278,7 @@ Type `/` and press `Tab` to complete. Arguments for `/effort`, `/theme`, `/model
 ## Features
 
 ### Chat
-- **Agent identity** — `[Boogy]` label from IDENTITY.md on every response
+- **Agent identity** — `[signet identity]` label from IDENTITY.md on every response
 - **Markdown rendering** — headers, code blocks, bold/italic, blockquotes, lists
 - **Contextual animated verbs** — Thinking, Deliberating, Hypothesizing, Riddling, Constructing, Squandering, Galloping, Fiddling (~4s cycle)
 - **Content padding** — breathing room from header and input box
