@@ -2332,6 +2332,8 @@ impl App {
     /// Stop recording and trigger final transcription
     fn stop_voice_recording(&mut self) {
         self.voice_recording = false;
+        self.voice_downloading = false;
+        self.voice_interim_text.clear();
 
         // Abort any in-flight interim transcription
         if let Some(handle) = self.voice_interim_handle.take() {
