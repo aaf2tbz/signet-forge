@@ -201,9 +201,12 @@ impl Provider for CliProvider {
 
         let mut cmd = CommandBuilder::new(&self.cli_path);
         cmd.args(&args);
+        // Inherit full environment so CLIs get PATH, HOME, API keys, etc.
+        for (k, v) in std::env::vars() {
+            cmd.env(k, v);
+        }
+        // Then override specific vars
         cmd.env("SIGNET_NO_HOOKS", "1");
-        // PTY gives us line-buffered output (the real win), but we parse JSON
-        // so suppress colors/interactive features that break JSON parsing
         cmd.env("TERM", "dumb");
         cmd.env("NO_COLOR", "1");
         cmd.env("LANG", "en_US.UTF-8");
@@ -417,9 +420,11 @@ impl Provider for CliProvider {
                         }
                     }
                     CliKind::Codex => {
+                        tracing::debug!("Codex line: {}", &line);
                         let parsed: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(_) => {
+                                tracing::debug!("Codex non-JSON: {}", &line);
                                 let _ = tx.blocking_send(StreamEvent::TextDelta(format!("{line}\n")));
                                 continue;
                             }
