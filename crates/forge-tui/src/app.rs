@@ -575,7 +575,7 @@ impl App {
                     .unwrap_or(self.pending_text.len());
                 // Find next space or newline after min_byte
                 let boundary = self.pending_text[min_byte..]
-                    .find(|c: char| c == ' ' || c == '\n')
+                    .find([' ', '\n'])
                     .map(|pos| min_byte + pos + 1) // include the space
                     .unwrap_or(self.pending_text.len().min(min_byte + 20)); // cap at ~20 extra chars
                 let boundary = boundary.min(self.pending_text.len());

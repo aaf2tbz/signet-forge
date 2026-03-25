@@ -209,9 +209,7 @@ fn interactive_select_providers() -> Result<Option<Vec<AuthProvider>>> {
                 }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     let all_selected = selected.iter().all(|x| *x);
-                    for slot in &mut selected {
-                        *slot = !all_selected;
-                    }
+                    selected.fill(!all_selected);
                 }
                 KeyCode::Enter => {
                     let chosen: Vec<AuthProvider> = AUTH_PROVIDERS
@@ -645,8 +643,5 @@ fn open_url(url: &str) -> std::io::Result<()> {
         return Ok(());
     }
     #[allow(unreachable_code)]
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "unsupported platform",
-    ))
+    Err(std::io::Error::other("unsupported platform"))
 }

@@ -32,6 +32,12 @@ pub struct ForgeUsage {
     max_scroll: usize,
 }
 
+impl Default for ForgeUsage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ForgeUsage {
     /// Collect usage data from local sources and create the overlay
     pub fn new() -> Self {
@@ -553,8 +559,7 @@ fn format_number(n: u64) -> String {
 
 fn shorten_model(model: &str) -> String {
     // Turn "claude-opus-4-5-20251101" into "opus-4-5"
-    if model.starts_with("claude-") {
-        let without_prefix = &model["claude-".len()..];
+    if let Some(without_prefix) = model.strip_prefix("claude-") {
         // Strip trailing date suffix like -20251101
         if let Some(pos) = without_prefix.rfind('-') {
             let suffix = &without_prefix[pos + 1..];

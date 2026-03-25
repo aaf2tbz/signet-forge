@@ -330,7 +330,7 @@ impl<'a> Widget for ChatView<'a> {
                 lines.push(Line::from(indented_spans));
             }
             // Blinking cursor — toggles every ~500ms (10 ticks at 50ms)
-            if (self.tick / 10) % 2 == 0 {
+            if (self.tick / 10).is_multiple_of(2) {
                 lines.push(Line::from(Span::styled(
                     "    ●",
                     Style::default().fg(t.accent),
