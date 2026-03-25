@@ -2551,7 +2551,7 @@ fn export_agent_zip(dest: &std::path::Path) -> Result<usize, String> {
             }
 
             if path.is_dir() {
-                zip.add_directory(&format!("{name}/"), options)
+                zip.add_directory(format!("{name}/"), options)
                     .map_err(|e| format!("Add dir {name}: {e}"))?;
                 add_dir(zip, base, &path, options, count)?;
             } else {
