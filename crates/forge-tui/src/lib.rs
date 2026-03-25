@@ -5,6 +5,7 @@ pub mod mcp_config;
 pub mod settings;
 pub mod theme;
 pub mod views;
+#[cfg(feature = "voice")]
 pub mod voice;
 pub mod widgets;
 

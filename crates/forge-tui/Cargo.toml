@@ -26,9 +26,13 @@ unicode-width = "0.2"
 reqwest-eventsource.workspace = true
 forge-mcp = { workspace = true }
 reqwest = { workspace = true }
-whisper-rs = "0.14"
-cpal = "0.15"
+whisper-rs = { version = "0.14", optional = true }
+cpal = { version = "0.15", optional = true }
 libc = "0.2"
 
+[features]
+default = ["voice"]
+voice = ["whisper-rs", "cpal"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.14", features = ["metal"] }
+whisper-rs = { version = "0.14", features = ["metal"], optional = true }
