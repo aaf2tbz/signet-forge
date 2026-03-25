@@ -4,7 +4,7 @@
 
 Forge is a terminal-native agentic AI client built in Rust. It connects directly to the [Signet](https://github.com/Signet-AI/signetai) daemon over localhost HTTP for memory, identity, secrets, and extraction — eliminating the dual-memory problem that exists when Signet runs as a plugin inside other AI harnesses.
 
-17,000+ lines of Rust across an 8-crate workspace. Zero JavaScript. Sub-5ms memory recall.
+17,000+ lines of Rust across an 8-crate workspace. Zero JavaScript. Sub-5ms memory recall. 12 built-in tools. 4 themes. Cross-platform.
 
 ---
 
@@ -21,6 +21,8 @@ Forge solves this by being the harness. There's no host memory system to fight b
 | Storage path | Depends which tool fires first | Always Signet |
 | Host auto-memory | Can't disable | Doesn't exist |
 | Search | Static file index | Vector + keyword hybrid |
+| Identity | Injected via hooks | Native — loaded at startup |
+| Agent name | Generic "Assistant" | From IDENTITY.md (e.g. [Boogy]) |
 
 > See [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md) for the full technical breakdown.
 
@@ -28,39 +30,39 @@ Forge solves this by being the harness. There's no host memory system to fight b
 
 ## The Pipeline
 
-This is how a conversation flows through Forge and Signet — from the moment you type to long-term memory persistence.
+How a conversation flows from typing to long-term memory.
 
 ```
 YOU
  │
- │  Type a message
+ │  Type a message (type-ahead works while model is thinking)
  ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     FORGE TERMINAL (TUI)                    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │ Status Bar                                          │    │
-│  │ [Model] [Cmd] [Dashboard] [Signet] [Keybinds] ...  │    │
+│  │ [Forge] model (provider) ● 19 recalled / 1672 mem  │    │
+│  │ [^O Model] [^K Cmd] [^D Dashboard] [^B Keybinds].. │    │
 │  ├─────────────────────────────────────────────────────┤    │
-│  │ Chat View                                           │    │
-│  │  > your message                                     │    │
 │  │                                                     │    │
-│  │  ◈ Thinking...                                      │    │
-│  │  ◆ Writing...                                       │    │
-│  │  ✓ [Edit] path/to/file.rs                           │    │
+│  │  [Boogy]                                            │    │
+│  │  response with markdown, code blocks, tool output   │    │
+│  │                                                     │    │
+│  │  ◈ Deliberating...                                  │    │
+│  │  ✓ [Edit] src/main.rs                               │    │
 │  │  ⟳ [Bash] cargo test                                │    │
 │  │                                                     │    │
-│  │  Response with markdown, code blocks, tool output   │    │
+│  │  > your message                                     │    │
 │  ├─────────────────────────────────────────────────────┤    │
-│  │ Input (expands with text, wraps, scrolls)           │    │
+│  │ Input (expands, wraps, scrolls to cursor)           │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
 │  forge-agent loop:                                          │
 │    prompt → recall → inject memories → LLM                  │
 │    → tool calls → execute → results → loop                  │
 │                                                             │
-│  forge-provider (PTY-based CLI streaming or direct API)     │
-│  forge-tools (Bash, Read, Write, Edit, Glob, Grep)          │
+│  forge-provider (PTY CLI streaming or direct API)           │
+│  forge-tools (12 built-in: core + web + signet)             │
 │  forge-signet (memory, identity, secrets, hooks)             │
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP (localhost:3850)
@@ -89,44 +91,33 @@ YOU
 │  └─ Reranking → final scored results injected into context  │
 │                                                             │
 │  STORAGE                                                    │
-│  ├─ SQLite (memories, entities, relations, jobs, sessions)  │
-│  ├─ FTS5 (full-text search index)                           │
-│  ├─ Vector index (embeddings for semantic similarity)       │
-│  └─ Knowledge graph (entities, aspects, attributes, deps)   │
+│  ├─ SQLite + FTS5 + Vector index + Knowledge graph          │
+│  └─ Entities, aspects, attributes, dependencies, relations  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Memory flow in detail
+### Memory flow
 
-1. **While you type** — speculative pre-recall fires after 500ms, warming the cache with relevant memories before you hit Enter
-2. **On submit** — targeted recall against your actual prompt. Graph traversal finds focal entities and walks the knowledge graph. Hybrid search (BM25 + vector) fills remaining slots. Constraints always surface. Results injected into LLM context.
-3. **During session** — `/recall` and `/remember` for manual search and storage. Path feedback tracks which retrieved memories were actually useful.
-4. **On quit** — full transcript submitted to Signet's extraction pipeline: LLM fact decomposition, decision stage (add/update/delete), entity linking, embedding, prospective hint generation, and retention decay.
+1. **While you type** — speculative pre-recall fires after 500ms, warming the cache
+2. **On submit** — graph traversal finds focal entities, hybrid search fills remaining slots, constraints always surface
+3. **During session** — `/recall` and `/remember` for manual search/storage, path feedback tracks usefulness
+4. **On quit** — transcript submitted for extraction, fact decomposition, entity linking, embedding
 
 ### Identity
 
-`SOUL.md`, `IDENTITY.md`, `USER.md`, and `AGENTS.md` load from `~/.agents/` at startup into the system prompt. This is structural identity, not memory recall — it defines who the agent is before any conversation begins.
+`SOUL.md`, `IDENTITY.md`, `USER.md`, and `AGENTS.md` load from `~/.agents/` at startup. The agent's name (from `**name:**` in IDENTITY.md) displays as `[Boogy]` before every response.
 
 ### CLI Provider Pipeline
 
-When using CLI providers (Claude Code, Codex, Gemini), Forge spawns the CLI in a **real PTY** for line-buffered streaming output. The CLI handles its own tool execution internally — Forge parses the stream-json events and renders tool cards, results, and text deltas in real-time.
+CLI providers spawn via **real PTY** (portable-pty, cross-platform) with 64KB read buffer. A watcher thread monitors child exit and drops the PTY master to signal EOF.
 
 ```
-Forge TUI
- │
- ├─ Spawns CLI in PTY (portable-pty, cross-platform)
- ├─ 64KB read buffer (handles burst output without backpressure)
- ├─ Watcher thread monitors child exit → drops PTY master → EOF
- │
- ├─ Parses stream-json NDJSON events:
- │   ├─ content_block_start (tool_use) → ToolStart card
- │   ├─ content_block_delta (text_delta) → streaming text
- │   ├─ content_block_delta (input_json_delta) → tool args
- │   ├─ tool_result → ToolResult card with output
- │   └─ result → final response
- │
- └─ /forge-bypass toggles --dangerously-skip-permissions (Claude)
-                          --dangerously-bypass-approvals-and-sandbox (Codex)
+Forge TUI → PTY spawn → 64KB chunk reads → ANSI strip → JSON parse
+  ├─ content_block_start (tool_use) → ToolStart card
+  ├─ content_block_delta (text_delta) → streaming text
+  ├─ tool_result → ToolResult card with output
+  └─ /forge-bypass → --dangerously-skip-permissions (Claude)
+                     --dangerously-bypass-approvals-and-sandbox (Codex)
 ```
 
 ---
@@ -135,11 +126,9 @@ Forge TUI
 
 ### From release (recommended)
 
-Tagged releases build automatically for macOS (ARM64, x64) and Linux (x64):
-
 ```bash
 curl -L https://github.com/aaf2tbz/signet-forge/releases/latest/download/forge-macos-arm64.tar.gz | tar xz
-mv forge ~/.cargo/bin/     # or /usr/local/bin/
+mv forge ~/.cargo/bin/
 ```
 
 ### From source
@@ -164,39 +153,26 @@ sudo apt install -y build-essential pkg-config libssl-dev libxcb-shape0-dev \
 sudo dnf install -y gcc openssl-devel libxcb-devel libxkbcommon-devel
 ```
 
-**Arch:**
-```bash
-sudo pacman -S base-devel openssl libxcb libxkbcommon
-```
-
 </details>
 
-### Verify
-
-```bash
-forge
-```
-
-On first run, Forge checks for Signet, offers to install it, runs setup, starts the daemon, discovers your providers, and drops you into a conversation. No config files to write.
+On first run, Forge checks for Signet, offers to install it, runs setup, starts the daemon, discovers your providers, and drops you into a conversation.
 
 ---
 
 ## Providers
 
-Use API keys, installed CLI tools, or local models. Forge auto-detects what you have.
-
 | Provider | How It Works |
 |---|---|
-| **Claude Code CLI** | Uses your installed `claude` binary via PTY — no API key needed |
-| **Codex CLI** | Uses your installed `codex` binary via PTY |
-| **Gemini CLI** | Uses your installed `gemini` binary via PTY |
+| **Claude Code CLI** | PTY-spawned `claude` binary — no API key needed |
+| **Codex CLI** | PTY-spawned `codex` binary |
+| **Gemini CLI** | PTY-spawned `gemini` binary |
 | **Anthropic API** | Direct Messages API with streaming + prompt caching |
 | **OpenAI API** | Chat Completions (GPT-4o, o4-mini) |
 | **Google API** | GenerateContent (Gemini 2.5 Flash/Pro, 1M context) |
 | **Groq / OpenRouter / xAI** | OpenAI-compatible APIs |
 | **Ollama** | Any local model, no key needed |
 
-Switch mid-session with `Ctrl+O`. The model picker always shows both API and CLI models regardless of your current provider. Your choice persists across sessions.
+Model picker (Ctrl+O) always shows API + CLI models. Daemon registry models merge in when available. Your choice persists across sessions.
 
 ---
 
@@ -217,7 +193,7 @@ forge --no-daemon                        # Standalone, no Signet
 
 ## Key Bindings
 
-All rebindable via `Ctrl+B` (keybind editor overlay) or `~/.config/forge/keybinds.json`. The header bar reflects your custom bindings in real-time.
+All rebindable via `Ctrl+B` (editor overlay) or `~/.config/forge/keybinds.json`. Header updates live.
 
 | Key | Action |
 |-----|--------|
@@ -226,8 +202,10 @@ All rebindable via `Ctrl+B` (keybind editor overlay) or `~/.config/forge/keybind
 | `Ctrl+K` | Command palette |
 | `Ctrl+G` | Signet command picker |
 | `Ctrl+D` | Dashboard navigator |
+| `Ctrl+H` | Session browser |
 | `Ctrl+B` | Keybind editor |
-| `Ctrl+V` | Paste (text or image) |
+| `F2` | Dashboard panel (Memory/Pipeline/Embeddings/Health) |
+| `Ctrl+V` | Paste |
 | `Ctrl+C` | Cancel generation |
 | `Ctrl+Q` | Quit |
 | `Ctrl+L` | Clear chat |
@@ -238,7 +216,7 @@ All rebindable via `Ctrl+B` (keybind editor overlay) or `~/.config/forge/keybind
 
 ## Commands
 
-Type `/` to see autocomplete suggestions. Press `Tab` to complete. Arguments for `/effort`, `/theme`, and `/model` show predictive options as you type.
+Type `/` and press `Tab` to complete. Arguments for `/effort`, `/theme`, `/model` show predictive options.
 
 | Command | What it does |
 |---|---|
@@ -247,50 +225,95 @@ Type `/` to see autocomplete suggestions. Press `Tab` to complete. Arguments for
 | `/model` | Open model picker |
 | `/effort <level>` | Reasoning effort (low/medium/high) — persists |
 | `/theme <name>` | Switch theme — persists |
-| `/forge-bypass` | Toggle CLI permission bypass (skip all approval prompts) |
-| `/keybinds` | Interactive keybind editor |
+| `/forge-bypass` | Toggle CLI permission bypass |
+| `/extraction-model` | View/change extraction pipeline model |
+| `/keybinds` | Keybind editor |
 | `/dashboard` | Dashboard page navigator |
 | `/status` | Agent and daemon status |
-| `/doctor` | Health checks with suggested fixes |
+| `/doctor` | Health checks |
 | `/pipeline` | Extraction pipeline status |
-| `/logs` | Last 50 daemon log lines |
+| `/logs` | Daemon log tail |
 | `/diagnostics` | Health score across all domains |
-| `/embed-audit` | Audit embedding coverage |
+| `/embed-audit` | Embedding coverage audit |
 | `/embed-backfill` | Backfill missing embeddings |
-| `/repair-requeue` | Requeue dead extraction jobs |
-| `/repair-leases` | Release stale job leases |
-| `/repair-fts` | Repair FTS search index |
-| `/secret-list` | List configured secrets |
-| `/skill-list` | List installed skills |
+| `/repair-requeue` | Requeue dead jobs |
+| `/repair-leases` | Release stale leases |
+| `/repair-fts` | Repair FTS index |
+| `/secret-list` | List secrets |
+| `/skill-list` | List skills |
 | `/clear` | Clear chat |
 | `/compact` | Force context compaction |
 | `/resume` | Resume last session |
 
 ---
 
+## Tools (12 built-in)
+
+### Core (6)
+| Tool | Permission | Description |
+|------|-----------|-------------|
+| Bash | Write | Execute shell commands |
+| Read | ReadOnly | Read file contents |
+| Write | Write | Create/overwrite files |
+| Edit | Write | Find-and-replace in files |
+| Glob | ReadOnly | Find files by pattern |
+| Grep | ReadOnly | Search file contents with regex |
+
+### Web (2)
+| Tool | Permission | Description |
+|------|-----------|-------------|
+| WebSearch | ReadOnly | DuckDuckGo search (no API key) |
+| WebFetch | ReadOnly | Fetch URL, strip HTML to text |
+
+### Signet (4, when daemon connected)
+| Tool | Permission | Description |
+|------|-----------|-------------|
+| memory_search | ReadOnly | Hybrid vector + keyword recall |
+| memory_store | Write | Save new memory to Signet |
+| knowledge_expand | ReadOnly | Drill into knowledge graph entity |
+| secret_exec | Write | Run command with secrets injected |
+
+---
+
 ## Features
 
-- **Agentic loop** — prompt, recall, LLM, tool calls, execute, loop
-- **6 built-in tools** — Bash, Read, Write, Edit, Glob, Grep with permission system
-- **PTY-based CLI streaming** — real-time output from Claude/Codex/Gemini CLIs via pseudo-terminal, 64KB buffer, no buffering delays
-- **CLI tool visibility** — tool use, results, and code changes from CLI providers render as cards in the chat
-- **Speculative pre-recall** — starts searching memories while you type (500ms debounce)
-- **4 themes** — signet-dark, signet-light, midnight, amber with full theme propagation
-- **Animated status** — contextual cycling verbs: *Thinking, Deliberating, Hypothesizing, Riddling...* (~4s per verb)
-- **Persistent settings** — model, provider, effort, theme, bypass saved to `~/.config/forge/settings.json`
-- **Permission bypass** — `/forge-bypass` toggles `--dangerously-skip-permissions` (Claude) or `--yolo` (Codex) mid-session
-- **Type-ahead input** — compose your next message while the model is thinking or streaming
-- **Expanding input box** — grows with content, wraps text, scrolls to cursor, snaps back on send
-- **Prompt caching** — Anthropic system prompt cached server-side for faster TTFT
-- **Context compaction** — auto-summarizes at 90% capacity
-- **Session persistence** — SQLite auto-save, `--resume` to continue
-- **Image support** — drag images into terminal or Ctrl+V to paste
-- **Markdown rendering** — headers, code blocks with language labels, bold/italic, blockquotes, lists
-- **Tab autocomplete** — predictive completion for all slash commands and arguments
-- **Dashboard navigator** — Ctrl+D opens page picker for every Signet dashboard tab
-- **Interactive keybind editor** — Ctrl+B opens overlay, rebind any key, saves immediately, header updates live
-- **MCP client** — stdio transport with JSON-RPC for external tool servers
-- **Non-interactive mode** — `forge -p "query"` for scripting and pipes
+### Chat
+- **Agent identity** — `[Boogy]` label from IDENTITY.md on every response
+- **Markdown rendering** — headers, code blocks, bold/italic, blockquotes, lists
+- **Contextual animated verbs** — Thinking, Deliberating, Hypothesizing, Riddling, Constructing, Squandering, Galloping, Fiddling (~4s cycle)
+- **Content padding** — breathing room from header and input box
+- **Auto-scroll** — hidden buffer render for exact wrapped height (no estimation drift)
+- **Unicode-width** — proper emoji/CJK display width calculations
+
+### Input
+- **Type-ahead** — compose while model is thinking/streaming
+- **Expanding box** — grows with content, wraps, scrolls to cursor, snaps back
+- **Tab completion** — predictive for all commands and arguments
+- **Paste/drag-drop** — text and image files
+
+### Providers
+- **PTY-based CLI streaming** — real pseudo-terminal, 64KB buffer, no buffering delays
+- **CLI tool visibility** — tool cards render from CLI stream-json events
+- **Permission bypass** — `/forge-bypass` mid-session toggle
+
+### Overlays
+- **Model picker (Ctrl+O)** — API + CLI + daemon registry models
+- **Command palette (Ctrl+K)** — fuzzy search commands + skills
+- **Dashboard panel (F2)** — Memory, Pipeline, Embeddings, Health tabs
+- **Session browser (Ctrl+H)** — resume any of last 20 sessions
+- **Keybind editor (Ctrl+B)** — rebind any key, saves immediately
+- **Dashboard navigator (Ctrl+D)** — open any Signet dashboard page
+
+### Persistence
+- **Settings** — model, provider, effort, theme, bypass saved to `~/.config/forge/settings.json`
+- **Sessions** — SQLite auto-save, `--resume` or Ctrl+H to continue
+- **Keybinds** — `~/.config/forge/keybinds.json` with live header updates
+
+### Platform
+- **Cross-platform** — macOS ARM64/x64, Linux x64
+- **4 themes** — signet-dark, signet-light, midnight, amber
+- **Terminal resize** — content reflows, hints truncate, scroll resets
+- **Non-interactive** — `forge -p "query"` for scripting
 
 ---
 
@@ -301,21 +324,24 @@ Type `/` to see autocomplete suggestions. Press `Tab` to complete. Arguments for
 | Crate | Purpose |
 |---|---|
 | `forge-cli` | Entry point, arg parsing, Signet onboarding, settings persistence |
-| `forge-tui` | TUI rendering, themes, overlays, keybind editor, chat scroll |
-| `forge-agent` | Agentic loop, message threading, permission system, effort/bypass |
-| `forge-provider` | LLM abstraction — API streaming (Anthropic, OpenAI, Google, Groq, Ollama) + PTY CLI spawning (Claude, Codex, Gemini) with 64KB chunk reads and ANSI stripping |
-| `forge-tools` | Bash, Read, Write, Edit, Glob, Grep implementations |
-| `forge-signet` | Signet HTTP client, identity loader, config watcher, session hooks |
-| `forge-mcp` | MCP stdio client with JSON-RPC handshake |
-| `forge-core` | Shared types and utilities |
+| `forge-tui` | TUI rendering, themes, overlays, keybind editor, chat scroll, agent name |
+| `forge-agent` | Agentic loop, message threading, permission system, effort/bypass, MCP routing |
+| `forge-provider` | LLM abstraction — API streaming + PTY CLI spawning with 64KB chunk reads |
+| `forge-tools` | 12 tools: Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, 4 Signet |
+| `forge-signet` | Signet HTTP client, identity loader, agent name parser, config watcher, hooks |
+| `forge-mcp` | MCP stdio client with JSON-RPC 2.0 handshake |
+| `forge-core` | Shared types, errors, message format |
 
 ### Key dependencies
 
-- `portable-pty` — cross-platform PTY for CLI providers (macOS, Linux, Windows)
+- `portable-pty` — cross-platform PTY for CLI providers
 - `ratatui` — terminal UI framework
 - `tokio` — async runtime
-- `reqwest` — HTTP client with SSE streaming
+- `reqwest` — HTTP + SSE streaming
 - `rusqlite` — session persistence
+- `unicode-width` — accurate display width for scroll calculations
+- `arboard` — clipboard access
+- `pulldown-cmark` — markdown parsing
 
 ---
 

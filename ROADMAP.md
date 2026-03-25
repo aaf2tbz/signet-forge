@@ -1,118 +1,114 @@
 # Signet Forge — Implementation Roadmap
 
-Six phases from scaffold to production. Each phase has a clear deliverable — something you can run and verify before moving to the next.
+Six phases from scaffold to production. Phases 1-5 complete. Phase 6 tracks future vision.
+
+**Current version: v0.5.11** | **12 built-in tools** | **8-crate workspace** | **All 5 core phases shipped**
 
 ---
 
 ## Phase 1: Foundation ✅
-**Goal:** Basic conversational AI terminal that calls one provider and streams responses.
 
-### What gets built
-- [x] Cargo workspace with 8 crates (core, provider, tools, mcp, signet, agent, tui, cli)
-- [x] `forge-core` — Message, Tool, Config, Error types
-- [x] `forge-provider` — Anthropic provider (Messages API + SSE streaming)
-- [x] `forge-signet/client` — HTTP client for Signet daemon
-- [x] `forge-signet/secrets` — API key resolution from daemon secret store
-- [x] `forge-signet/config` — agent.yaml loading, identity file reading (SOUL.md, IDENTITY.md, USER.md, AGENTS.md)
-- [x] `forge-signet/hooks` — Session lifecycle hooks (start, prompt-submit, pre-compaction, end)
-- [x] `forge-signet/memory` — Memory recall and store via daemon API
-- [x] `forge-tools` — 6 built-in tools (Bash, Read, Write, Edit, Glob, Grep)
-- [x] `forge-agent` — Agentic loop (message → LLM → tool calls → execute → loop)
-- [x] `forge-tui` — Chat view, status bar, input handling, key bindings
-- [x] `forge-cli` — CLI entry point with clap (model, provider, daemon-url, no-daemon, resume flags)
+- [x] 8-crate Cargo workspace (core, provider, tools, mcp, signet, agent, tui, cli)
+- [x] Anthropic Messages API with SSE streaming
+- [x] Signet daemon HTTP client, secret resolution, identity file loading
+- [x] Session lifecycle hooks (start, prompt-submit, pre-compaction, end)
+- [x] Memory recall and store via daemon API
+- [x] 6 core tools (Bash, Read, Write, Edit, Glob, Grep)
+- [x] Agentic loop (prompt → recall → LLM → tools → execute → loop)
+- [x] Chat TUI with status bar, input handling, key bindings
 
 ---
 
 ## Phase 2: Tool Execution + Memory Integration ✅
-**Goal:** Full agentic coding loop with tool execution and Signet memory injection on every prompt.
 
-### What gets built
-- [x] Wire tool execution into the agentic loop (tool_use parsing → execute → result → loop back to LLM)
-- [x] Permission system — auto-approve read-only tools, dialog for write tools, always-confirm for dangerous ops
-- [x] Permission approval dialog in TUI (Allow / Deny / Always Allow)
-- [x] Session lifecycle hooks firing at the right moments
-- [x] Context window management — track token usage, trigger auto-compact at 90% capacity
-- [x] Markdown rendering in chat output (pulldown-cmark)
-- [x] Tool output rendering (collapsible, truncated for long outputs)
-- [ ] Syntax-highlighted code blocks (syntect) — code blocks render with borders, lang-aware highlighting deferred
+- [x] Tool use parsing, execution, result loop-back
+- [x] Permission system (auto-approve read, dialog for write, confirm for dangerous)
+- [x] Permission approval dialog (Allow / Deny / Always Allow)
+- [x] Context window management (auto-compact at 90%)
+- [x] Markdown rendering (pulldown-cmark: headers, code blocks, bold/italic, lists, quotes)
+- [x] Tool output rendering (status cards with ✓/✗/⟳ indicators)
 
 ---
 
 ## Phase 3: Multi-Provider + Model Switching ✅
-**Goal:** Support all major providers with runtime hot-switching.
 
-### What gets built
-- [x] Provider implementations: OpenAI, Gemini, Groq, Ollama, OpenRouter, xAI
-- [x] CLI providers via PTY: Claude Code, Codex, Gemini — real pseudo-terminal with 64KB buffer
-- [x] Model picker UI (Ctrl+O) — shows both API and CLI models regardless of current provider
-- [x] Config file watching with `notify` crate — real-time response to agent.yaml changes
-- [x] Session persistence in local SQLite — auto-save on quit, load on resume
-- [x] Session resume (`forge --resume`) — restores last session's message history
-- [x] Persistent settings — model, provider, effort, theme, bypass saved to `~/.config/forge/settings.json`
+- [x] 8 provider implementations: Anthropic, OpenAI, Gemini, Groq, Ollama, OpenRouter, xAI, CLI
+- [x] CLI providers via PTY (portable-pty): Claude Code, Codex, Gemini — 64KB buffer, cross-platform
+- [x] PTY watcher thread — drops master on child exit, prevents reader freeze
+- [x] ANSI escape stripping for clean JSON parsing from CLI output
+- [x] Model picker (Ctrl+O) — shows API + CLI models, daemon registry models
+- [x] `/extraction-model` command — view/change Signet extraction pipeline model
+- [x] Session browser (Ctrl+H) — list 20 recent sessions, resume any
+- [x] Session persistence in SQLite — auto-save, `--resume`
+- [x] Persistent settings (`~/.config/forge/settings.json`) — model, provider, effort, theme, bypass
 - [x] CLI tool detection at startup — auto-discovers installed `claude`, `codex`, `gemini`
-- [ ] Connect to daemon's `GET /api/pipeline/model-registry` for dynamic model discovery
-- [ ] Extraction model sync — changing primary model optionally updates extraction model
-- [ ] Session browser (Ctrl+H) — list past sessions, preview, resume
+- [x] Config file watching (notify crate) — real-time agent.yaml reload
 
 ---
 
 ## Phase 4: MCP + Skills + Dashboard ✅
-**Goal:** Feature parity with Claude Code for Signet users, plus dashboard integration no other tool has.
 
-### What gets built
-- [x] MCP client — stdio transport (subprocess JSON-RPC with initialize handshake)
-- [x] MCP tool routing — agent loop tries MCP clients for unknown tools (fallback chain)
-- [x] Skill loading from `~/.agents/skills/` — parse SKILL.md frontmatter, register as slash commands
-- [x] Command palette (Ctrl+K) — fuzzy search over built-in commands + skills
-- [x] CLI tool visibility — tool_use, tool_result, and code changes from CLI stream-json render as cards
+- [x] MCP stdio client with JSON-RPC 2.0 handshake
+- [x] MCP tool routing — agent loop tries MCP clients as fallback for unknown tools
+- [x] Skill loading from `~/.agents/skills/` — SKILL.md frontmatter → slash commands
+- [x] Command palette (Ctrl+K) — fuzzy search over commands + skills
+- [x] CLI tool visibility — content_block_start/delta/stop + tool_result events render as cards
 - [x] Signet native tools — memory_search, memory_store, knowledge_expand, secret_exec via daemon HTTP
-- [x] Dashboard overlay panel (F2) — tabbed view: Memory, Pipeline, Embeddings, Health with live data
+- [x] Dashboard panel (F2) — tabbed overlay: Memory, Pipeline, Embeddings, Health
 - [x] WebSearch tool — DuckDuckGo HTML search, no API key
 - [x] WebFetch tool — fetch + strip HTML to text, 50K char limit
-- [x] 12 built-in tools total (Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, memory_search, memory_store, knowledge_expand, secret_exec)
+- [x] **12 built-in tools total**
 
 ---
 
 ## Phase 5: Polish + Cross-Platform Release ✅
-**Goal:** Production-ready single binary with CI/CD.
 
-### What gets built
-- [x] Cross-platform builds — macOS ARM64/x64, Linux x64 (GitHub Actions matrix)
-- [x] GitHub Actions CI/CD — build.yml (check + clippy + build), release.yml (binary releases on tag)
-- [x] Theme system — 4 themes (signet-dark, signet-light, midnight, amber) with dedicated spinner colors
-- [x] Keyboard shortcut customization — `~/.config/forge/keybinds.json` + interactive editor overlay (Ctrl+B)
-- [x] Dynamic header — keybind hints reflect custom bindings in real-time
-- [x] Non-interactive mode (`forge -p "prompt"`) — streams response to stdout, exits
-- [x] Type-ahead input — compose next message while model is thinking/streaming
-- [x] Expanding input box — grows with content, wraps text, scrolls to cursor, snaps back on send
-- [x] Tab autocomplete — predictive completion for all slash commands and arguments
-- [x] `/forge-bypass` — toggle CLI permission bypass mid-session (Claude: `--dangerously-skip-permissions`, Codex: `--yolo`)
-- [x] `/effort` — reasoning effort with persistence across sessions
-- [x] Contextual animated status verbs — Thinking, Deliberating, Hypothesizing, Riddling, etc. (~4s cycle)
-- [x] Chat auto-scroll — accounts for word-wrapped lines, keeps latest content visible
-- [ ] Error recovery — daemon connection lost (reconnect), API timeout (retry), graceful degradation
-- [ ] Session import from Claude Code (parse `.claude/sessions/`)
-- [ ] Installer scripts for quick setup
+- [x] Cross-platform CI/CD — macOS ARM64/x64, Linux x64 (GitHub Actions)
+- [x] 4 themes: signet-dark, signet-light, midnight, amber — with dedicated spinner colors
+- [x] Keybind editor (Ctrl+B) — interactive overlay, saves to `~/.config/forge/keybinds.json`
+- [x] Dynamic header — keybind hints update in real-time, overflow-aware for narrow terminals
+- [x] Agent name display — reads `**name:**` from IDENTITY.md, shows `[Boogy]` on responses
+- [x] Type-ahead input — compose while model is thinking/streaming
+- [x] Expanding input box — grows with content, wraps, scrolls to cursor, snaps back on send
+- [x] Tab autocomplete — predictive completion for all commands and arguments
+- [x] `/forge-bypass` — toggle CLI permission bypass mid-session
+- [x] `/effort` — reasoning effort with cross-session persistence
+- [x] Contextual animated verbs — Thinking, Deliberating, Hypothesizing, Riddling, Constructing, Squandering, Galloping, Fiddling (~4s cycle, 8+ verbs per phase)
+- [x] Chat auto-scroll — hidden buffer render for exact wrapped height measurement
+- [x] Content padding — 2-line gap from header, 2-line gap before input
+- [x] Terminal resize handling — Event::Resize resets scroll, hints truncate to fit
+- [x] Unicode-width scroll — proper emoji/CJK display width calculations
+- [x] File path detection — `/Users/...` not misidentified as slash commands
+- [x] Non-interactive mode — `forge -p "prompt"` streams to stdout
 
 ---
 
 ## Phase 6: Future Vision
-These are stretch goals — things that become possible once the foundation is solid.
 
-- [ ] **Windowed mode** — embed ratatui output in a winit window (like WindowedClaude, but with Forge's full capabilities)
-- [ ] **Multi-tab sessions** — multiple concurrent conversations
+Stretch goals and next-generation features.
+
+### Near-term
+- [ ] **Error recovery** — daemon reconnect, API timeout retry, graceful degradation
+- [ ] **Syntax highlighting** — syntect-based code block coloring per language
+- [ ] **Interactive CLI prompts** — detect/respond to CLI approval prompts from TUI
+- [ ] **SSE event stream** — real-time dashboard updates from daemon event bus
+- [ ] **Session import** — parse Claude Code `.claude/sessions/` for migration
+
+### Medium-term
+- [ ] **Multi-agent support** — thread `agent_id` on all daemon calls, per-agent identity
+- [ ] **Sub-agent tool** — spawn restricted-tool research tasks in parallel
+- [ ] **Marketplace MCP proxy** — route daemon marketplace tools through Forge
+- [ ] **External MCP config** — configure and connect to arbitrary MCP servers
+- [ ] **Installer scripts** — curl-based quick setup for new users
+
+### Long-term
+- [ ] **Windowed mode** — embed ratatui in a winit window (WindowedClaude-style)
+- [ ] **Multi-tab sessions** — concurrent conversations in split views
 - [ ] **Image display** — sixel or kitty graphics protocol for inline images
 - [ ] **Voice input** — whisper integration for dictation
-- [ ] **Agent-to-agent collaboration** — multiple Forge instances coordinating via Signet cross-agent API
-- [ ] **Multi-agent support** — thread `agent_id` on all daemon calls, per-agent identity files
-- [ ] **Remote sessions** — Forge running on a remote server, accessed via SSH with full TUI
+- [ ] **Agent-to-agent** — Forge instances coordinating via Signet cross-agent API
+- [ ] **Remote sessions** — Forge on a server, accessed via SSH
 - [ ] **Plugin system** — third-party tool and view extensions
-- [ ] **Interactive CLI prompts** — detect and respond to CLI approval prompts (write to file? y/n) from within the TUI
-- [ ] **Syntax highlighting** — syntect-based code block coloring per language
-- [ ] **SSE event stream** — real-time dashboard updates from daemon event bus
-- [ ] **Sub-agent tool** — spawn restricted-tool research tasks in parallel
-- [ ] **Marketplace MCP proxy** — route daemon marketplace proxy tools through Forge
-- [ ] **External MCP config** — configure and connect to arbitrary MCP servers
 
 ---
 
@@ -124,7 +120,7 @@ forge-cli
   │     ├── forge-agent
   │     │     ├── forge-provider (+ portable-pty)
   │     │     │     └── forge-core
-  │     │     ├── forge-tools
+  │     │     ├── forge-tools (+ reqwest, urlencoding)
   │     │     │     └── forge-core
   │     │     ├── forge-mcp
   │     │     │     └── forge-core
@@ -135,4 +131,4 @@ forge-cli
   └── forge-signet
 ```
 
-Each crate is independently testable. `forge-core` has zero external runtime dependencies beyond serde. `forge-provider` can be tested against mock HTTP servers. `forge-tools` can be tested with real filesystem operations. `forge-signet` can be tested against a running daemon or mocked responses.
+Each crate is independently testable. `forge-core` has zero external runtime dependencies beyond serde.
