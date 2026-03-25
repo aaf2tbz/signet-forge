@@ -68,7 +68,7 @@ impl<'a> Widget for ChatView<'a> {
             };
 
             // Vertical centering
-            let content_height = 12;
+            let content_height = 15;
             let pad = (area.height as usize).saturating_sub(content_height) / 3;
             for _ in 0..pad {
                 lines.push(Line::from(""));
@@ -79,7 +79,6 @@ impl<'a> Widget for ChatView<'a> {
                 center("◇  ◈  ◆  ◈  ◇"),
                 Style::default().fg(t.spinner),
             )));
-
             lines.push(Line::from(""));
 
             // FORGE — spaced, heavy
@@ -88,51 +87,48 @@ impl<'a> Widget for ChatView<'a> {
                 Style::default().fg(t.fg_bright).add_modifier(Modifier::BOLD),
             )));
 
-            lines.push(Line::from(""));
-
             // Your agent — the soul of this session
             let name = self.agent_name;
             lines.push(Line::from(Span::styled(
                 center(name),
-                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                Style::default().fg(t.accent),
             )));
 
+            lines.push(Line::from(""));
+
+            // Separator — visible
+            let rule_width = 32.min(w.saturating_sub(4));
+            let rule = "─".repeat(rule_width);
+            lines.push(Line::from(Span::styled(
+                center(&rule),
+                Style::default().fg(t.muted),
+            )));
             lines.push(Line::from(""));
 
             // The readout — what's loaded, what's alive
-            let rule_width = 36.min(w.saturating_sub(4));
-            let rule = "━".repeat(rule_width);
-            lines.push(Line::from(Span::styled(
-                center(&rule),
-                Style::default().fg(t.border),
-            )));
-            lines.push(Line::from(""));
-
-            // Show the forge's state — memories, model, connection
             let mem_line = if self.total_memories > 0 {
                 format!("▸ {} memories loaded", self.total_memories)
             } else {
-                "▸ memory ready".to_string()
+                "▸ memory standing by".to_string()
             };
             lines.push(Line::from(Span::styled(
                 center(&mem_line),
-                Style::default().fg(t.muted),
+                Style::default().fg(t.fg),
             )));
             lines.push(Line::from(Span::styled(
                 center("▸ identity forged · soul intact"),
-                Style::default().fg(t.muted),
+                Style::default().fg(t.fg),
             )));
 
             lines.push(Line::from(""));
 
             lines.push(Line::from(Span::styled(
                 center(&rule),
-                Style::default().fg(t.border),
+                Style::default().fg(t.muted),
             )));
-
             lines.push(Line::from(""));
 
-            // The invitation — not generic, alive
+            // The invitation
             lines.push(Line::from(Span::styled(
                 center("the fire's lit."),
                 Style::default().fg(t.spinner),
