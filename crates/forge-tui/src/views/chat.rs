@@ -57,53 +57,56 @@ impl<'a> Widget for ChatView<'a> {
         lines.push(Line::from(""));
         lines.push(Line::from(""));
 
-        // Welcome screen — centered ASCII art landing (inspired by OpenCode)
+        // Welcome screen — your agent is here, waiting
         if self.entries.is_empty() && self.streaming_text.is_empty() {
-            let logo = [
-                r"  ███████╗ ██████╗ ██████╗  ██████╗ ███████╗",
-                r"  ██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝",
-                r"  █████╗  ██║   ██║██████╔╝██║  ███╗█████╗  ",
-                r"  ██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝  ",
-                r"  ██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗",
-                r"  ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
-            ];
+            let w = area.width as usize;
+            let center = |s: &str| -> String {
+                let pad = w.saturating_sub(s.len()) / 2;
+                format!("{}{s}", " ".repeat(pad))
+            };
 
-            // Center vertically — push lines to roughly middle of viewport
-            let logo_height = logo.len() + 8; // logo + spacing + text
-            let pad = (area.height as usize).saturating_sub(logo_height) / 3;
+            // Vertical centering
+            let content_height = 12;
+            let pad = (area.height as usize).saturating_sub(content_height) / 3;
             for _ in 0..pad {
                 lines.push(Line::from(""));
             }
 
-            // Center horizontally
-            let max_logo_width = logo.iter().map(|l| l.len()).max().unwrap_or(0);
-            let left_pad = (area.width as usize).saturating_sub(max_logo_width) / 2;
-            let spacer = " ".repeat(left_pad);
-
-            for line in &logo {
-                lines.push(Line::from(Span::styled(
-                    format!("{spacer}{line}"),
-                    Style::default().fg(t.accent),
-                )));
-            }
-
+            // The anvil — forge's mark
+            lines.push(Line::from(Span::styled(
+                center("⚒"),
+                Style::default().fg(t.accent),
+            )));
             lines.push(Line::from(""));
 
-            // Agent name centered below
+            // Agent name — big and bold
             let name = self.agent_name;
-            let name_pad = " ".repeat((area.width as usize).saturating_sub(name.len()) / 2);
             lines.push(Line::from(Span::styled(
-                format!("{name_pad}{name}"),
-                Style::default().fg(t.fg).add_modifier(Modifier::BOLD),
+                center(name),
+                Style::default().fg(t.fg_bright).add_modifier(Modifier::BOLD),
+            )));
+
+            // Subtle tagline
+            lines.push(Line::from(Span::styled(
+                center("forged by Signet"),
+                Style::default().fg(t.muted),
             )));
 
             lines.push(Line::from(""));
             lines.push(Line::from(""));
 
-            let hint = "Type a message or Ctrl+R to speak";
-            let hint_pad = " ".repeat((area.width as usize).saturating_sub(hint.len()) / 2);
+            // Separator dots
+            let dots = "· · ·";
             lines.push(Line::from(Span::styled(
-                format!("{hint_pad}{hint}"),
+                center(dots),
+                Style::default().fg(t.border),
+            )));
+
+            lines.push(Line::from(""));
+
+            let hint = "speak or type — I'm here";
+            lines.push(Line::from(Span::styled(
+                center(hint),
                 Style::default().fg(t.muted),
             )));
         }
