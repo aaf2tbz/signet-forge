@@ -16,6 +16,7 @@ pub enum ChatEntry {
     ToolCall {
         name: String,
         status: ToolStatus,
+        detail: Option<String>,
     },
     ToolOutput {
         name: String,
@@ -197,13 +198,13 @@ impl<'a> Widget for ChatView<'a> {
                         lines.push(Line::from(indented_spans));
                     }
                 }
-                ChatEntry::ToolCall { name, status } => {
+                ChatEntry::ToolCall { name, status, detail } => {
                     let (indicator, color) = match status {
                         ToolStatus::Running => ("⟳", t.warning),
                         ToolStatus::Complete => ("✓", t.success),
                         ToolStatus::Error => ("✗", t.error),
                     };
-                    lines.push(Line::from(vec![
+                    let mut spans = vec![
                         Span::raw("  "),
                         Span::styled(indicator, Style::default().fg(color)),
                         Span::styled(" [", Style::default().fg(t.muted)),
@@ -214,16 +215,24 @@ impl<'a> Widget for ChatView<'a> {
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled("]", Style::default().fg(t.muted)),
-                    ]));
+                    ];
+                    if let Some(d) = detail {
+                        spans.push(Span::styled(
+                            format!(" {d}"),
+                            Style::default().fg(t.muted),
+                        ));
+                    }
+                    lines.push(Line::from(spans));
                 }
                 ChatEntry::ToolOutput {
-                    output, is_error, ..
+                    name, output, is_error,
                 } => {
                     let style = if *is_error {
                         Style::default().fg(t.error)
                     } else {
                         Style::default().fg(t.muted)
                     };
+                    let is_grep = name.to_lowercase() == "grep";
                     let max_lines = 15;
                     for line in output.lines().take(max_lines) {
                         let display = if line.len() > 120 {
@@ -237,6 +246,19 @@ impl<'a> Widget for ChatView<'a> {
                         } else {
                             line.to_string()
                         };
+                        // Grep output: highlight file:line prefix
+                        if is_grep && !*is_error {
+                            if let Some(colon) = display.find(':') {
+                                let file_part = display[..colon].to_string();
+                                let rest = display[colon..].to_string();
+                                lines.push(Line::from(vec![
+                                    Span::raw("    "),
+                                    Span::styled(file_part, Style::default().fg(t.accent)),
+                                    Span::styled(rest, style),
+                                ]));
+                                continue;
+                            }
+                        }
                         lines.push(Line::from(Span::styled(
                             format!("    {display}"),
                             style,

@@ -2115,7 +2115,18 @@ impl App {
                 self.entries.push(ChatEntry::ToolCall {
                     name,
                     status: ToolStatus::Running,
+                    detail: None,
                 });
+            }
+            AgentEvent::ToolDetail { name, detail, .. } => {
+                // Retroactively enrich the most recent matching ToolCall
+                if let Some(ChatEntry::ToolCall { detail: d, .. }) =
+                    self.entries.iter_mut().rev().find(|e| {
+                        matches!(e, ChatEntry::ToolCall { name: n, .. } if *n == name)
+                    })
+                {
+                    *d = Some(detail);
+                }
             }
             AgentEvent::ToolResult {
                 name,
@@ -2127,10 +2138,15 @@ impl App {
                 if name == "secret_exec" && !is_error {
                     self.secrets_used += 1;
                 }
-                // Update tool call status
+                // Update tool call status — preserve existing detail
                 if let Some(entry) = self.entries.iter_mut().rev().find(|e| {
-                    matches!(e, ChatEntry::ToolCall { name: n, status: ToolStatus::Running } if *n == name)
+                    matches!(e, ChatEntry::ToolCall { name: n, status: ToolStatus::Running, .. } if *n == name)
                 }) {
+                    let existing_detail = if let ChatEntry::ToolCall { detail, .. } = entry {
+                        detail.clone()
+                    } else {
+                        None
+                    };
                     *entry = ChatEntry::ToolCall {
                         name: name.clone(),
                         status: if is_error {
@@ -2138,6 +2154,7 @@ impl App {
                         } else {
                             ToolStatus::Complete
                         },
+                        detail: existing_detail,
                     };
                 }
                 self.entries.push(ChatEntry::ToolOutput {

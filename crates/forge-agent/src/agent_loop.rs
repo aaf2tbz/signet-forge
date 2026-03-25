@@ -6,6 +6,8 @@ use forge_provider::{CompletionOpts, Provider, ReasoningEffort, StreamEvent};
 use forge_signet::hooks::SessionHooks;
 use forge_tools::{self, Tool as _};
 use futures::StreamExt;
+use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
@@ -32,6 +34,8 @@ pub enum AgentEvent {
     TurnComplete,
     /// Error occurred
     Error(String),
+    /// Retroactive detail for a running tool call (e.g. file path, command)
+    ToolDetail { id: String, name: String, detail: String },
     /// Thinking/status message
     Status(String),
     /// Memory injection count from prompt-submit hook
@@ -167,6 +171,7 @@ impl AgentLoop {
             .await;
 
         // 3. Run the agentic loop
+        let mut loop_detector = LoopDetector::new(3);
         loop {
             // Build system prompt with memory context
             let full_system = if memory_context.is_empty() {
@@ -248,6 +253,16 @@ impl AgentLoop {
                                     serde_json::Value::Object(Default::default())
                                 }
                             };
+                        // Send detail (file path, command, pattern) to TUI
+                        if !current_tool_name.is_empty() {
+                            if let Some(detail) = extract_tool_detail(&current_tool_name, &input) {
+                                let _ = self.event_tx.send(AgentEvent::ToolDetail {
+                                    id: current_tool_id.clone(),
+                                    name: current_tool_name.clone(),
+                                    detail,
+                                }).await;
+                            }
+                        }
                         tool_calls.push(ToolCall {
                             id: current_tool_id.clone(),
                             name: current_tool_name.clone(),
@@ -334,6 +349,23 @@ impl AgentLoop {
             // 8. Execute tool calls with permission checks
             let mut tool_results_content = Vec::new();
             for tc in &tool_calls {
+                // Doom-loop detection: 3 identical consecutive calls → break
+                if loop_detector.record(&tc.name, &tc.input) {
+                    let msg = format!(
+                        "Loop detected: '{}' called 3 times with identical input. Breaking.",
+                        tc.name
+                    );
+                    warn!("{msg}");
+                    let _ = self.event_tx.send(AgentEvent::ToolResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: msg.clone(),
+                        is_error: true,
+                    }).await;
+                    let _ = self.event_tx.send(AgentEvent::Error(msg)).await;
+                    let _ = self.event_tx.send(AgentEvent::TurnComplete).await;
+                    return;
+                }
                 let tool_impl = match &self.daemon_url {
                     Some(url) => forge_tools::find_tool_with_subagent(
                         &tc.name,
@@ -469,5 +501,74 @@ impl AgentLoop {
             // Loop back for the next LLM call with tool results
             memory_context.clear();
         }
+    }
+}
+
+/// Extract a human-readable detail string from a tool's input JSON.
+fn extract_tool_detail(name: &str, input: &serde_json::Value) -> Option<String> {
+    match name.to_lowercase().as_str() {
+        "bash" | "shell" | "secret_exec" => {
+            input.get("command").and_then(|v| v.as_str()).map(|cmd| {
+                if cmd.len() > 80 { format!("{}...", &cmd[..77]) } else { cmd.to_string() }
+            })
+        }
+        "read" => {
+            let path = input.get("file_path").and_then(|v| v.as_str())?;
+            let short = shorten_path(path);
+            match (
+                input.get("offset").and_then(|v| v.as_u64()),
+                input.get("limit").and_then(|v| v.as_u64()),
+            ) {
+                (Some(o), Some(l)) => Some(format!("{short}:{o}-{}", o + l)),
+                (Some(o), None) => Some(format!("{short}:{o}")),
+                _ => Some(short),
+            }
+        }
+        "write" | "edit" => {
+            input.get("file_path").and_then(|v| v.as_str()).map(shorten_path)
+        }
+        "grep" => input.get("pattern").and_then(|v| v.as_str()).map(|p| {
+            if p.len() > 60 { format!("{}...", &p[..57]) } else { p.to_string() }
+        }),
+        "glob" => input.get("pattern").and_then(|v| v.as_str()).map(String::from),
+        "memory_search" => input.get("query").and_then(|v| v.as_str()).map(|q| {
+            if q.len() > 60 { format!("{}...", &q[..57]) } else { q.to_string() }
+        }),
+        _ => None,
+    }
+}
+
+fn shorten_path(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() <= 2 {
+        path.to_string()
+    } else {
+        format!(".../{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
+    }
+}
+
+/// Detects repeated identical tool calls (doom loops).
+struct LoopDetector {
+    recent: VecDeque<u64>,
+    threshold: usize,
+}
+
+impl LoopDetector {
+    fn new(threshold: usize) -> Self {
+        Self { recent: VecDeque::with_capacity(threshold + 1), threshold }
+    }
+
+    /// Record a call. Returns `true` if the last N calls are all identical.
+    fn record(&mut self, name: &str, input: &serde_json::Value) -> bool {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        name.hash(&mut hasher);
+        serde_json::to_string(input).unwrap_or_default().hash(&mut hasher);
+        let hash = hasher.finish();
+
+        self.recent.push_back(hash);
+        if self.recent.len() > self.threshold {
+            self.recent.pop_front();
+        }
+        self.recent.len() >= self.threshold && self.recent.iter().all(|&h| h == hash)
     }
 }
