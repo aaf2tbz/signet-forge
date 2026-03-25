@@ -1,20 +1,27 @@
 use crate::client::SignetClient;
 use forge_core::ForgeError;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use tracing::debug;
 
-/// Known provider → secret name mappings
-const PROVIDER_SECRETS: &[(&str, &str)] = &[
-    ("anthropic", "ANTHROPIC_API_KEY"),
-    ("openai", "OPENAI_API_KEY"),
-    ("gemini", "GEMINI_API_KEY"),
-    ("groq", "GROQ_API_KEY"),
-    ("openrouter", "OPENROUTER_API_KEY"),
-    ("xai", "XAI_API_KEY"),
-];
+/// API providers Forge supports directly.
+const API_PROVIDERS: &[&str] = &["anthropic", "openai", "gemini", "groq", "openrouter", "xai"];
+
+/// Local Forge credential file. This is separate from Signet secrets.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct LocalCredentials {
+    #[serde(default)]
+    api_keys: HashMap<String, String>,
+    #[serde(default)]
+    cli_env: HashMap<String, HashMap<String, String>>,
+}
 
 /// Where an API key / provider was found
 #[derive(Debug, Clone, PartialEq)]
 pub enum KeySource {
+    /// Forge local credential file (platform config dir, e.g. ~/.config/forge or ~/Library/Application Support/forge)
+    LocalStore,
     /// Signet daemon encrypted secret store
     Daemon,
     /// Process environment variable
@@ -26,6 +33,7 @@ pub enum KeySource {
 impl std::fmt::Display for KeySource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            KeySource::LocalStore => write!(f, "forge"),
             KeySource::Daemon => write!(f, "daemon"),
             KeySource::Environment => write!(f, "env"),
             KeySource::Cli { .. } => write!(f, "cli"),
@@ -39,6 +47,176 @@ pub struct DiscoveredProvider {
     pub provider: String,
     pub secret_name: String,
     pub source: KeySource,
+}
+
+/// Path to Forge's local credentials store.
+pub fn credentials_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("forge")
+        .join("credentials.json")
+}
+
+fn canonical_provider(provider: &str) -> &str {
+    match provider {
+        "google" => "gemini",
+        _ => provider,
+    }
+}
+
+fn provider_env_keys(provider: &str) -> &'static [&'static str] {
+    match canonical_provider(provider) {
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "openai" => &["OPENAI_API_KEY"],
+        // Support both names for Google/Gemini APIs.
+        "gemini" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "groq" => &["GROQ_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "xai" => &["XAI_API_KEY"],
+        _ => &[],
+    }
+}
+
+fn cli_env_keys(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "claude-cli" => &["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"],
+        "codex-cli" => &["CODEX_API_KEY", "OPENAI_API_KEY"],
+        "gemini-cli" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        _ => &[],
+    }
+}
+
+fn load_local_credentials() -> LocalCredentials {
+    let path = credentials_path();
+    if !path.exists() {
+        return LocalCredentials::default();
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_local_credentials(creds: &LocalCredentials) -> Result<(), ForgeError> {
+    let path = credentials_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(creds)?;
+    std::fs::write(&path, json)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Store/update a provider API key in Forge's local credentials file.
+pub fn store_local_api_key(provider: &str, api_key: &str) -> Result<(), ForgeError> {
+    let provider = canonical_provider(provider);
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err(ForgeError::config("API key cannot be empty"));
+    }
+
+    let mut creds = load_local_credentials();
+    creds.api_keys.insert(provider.to_string(), key.to_string());
+    save_local_credentials(&creds)
+}
+
+/// Remove a provider API key from Forge's local credentials file.
+pub fn clear_local_api_key(provider: &str) -> Result<(), ForgeError> {
+    let provider = canonical_provider(provider);
+    let mut creds = load_local_credentials();
+    creds.api_keys.remove(provider);
+    save_local_credentials(&creds)
+}
+
+/// Store CLI auth environment variables for a provider in Forge local credentials.
+pub fn store_local_cli_auth_env(
+    provider: &str,
+    env_vars: &HashMap<String, String>,
+) -> Result<(), ForgeError> {
+    let provider = canonical_provider(provider);
+    let cleaned: HashMap<String, String> = env_vars
+        .iter()
+        .filter_map(|(k, v)| {
+            let val = v.trim();
+            if val.is_empty() {
+                None
+            } else {
+                Some((k.clone(), val.to_string()))
+            }
+        })
+        .collect();
+
+    if cleaned.is_empty() {
+        return Err(ForgeError::config("CLI auth token cannot be empty"));
+    }
+
+    let mut creds = load_local_credentials();
+    creds.cli_env.insert(provider.to_string(), cleaned);
+    save_local_credentials(&creds)
+}
+
+/// Remove locally stored CLI auth variables for a provider.
+pub fn clear_local_cli_auth(provider: &str) -> Result<(), ForgeError> {
+    let provider = canonical_provider(provider);
+    let mut creds = load_local_credentials();
+    creds.cli_env.remove(provider);
+    save_local_credentials(&creds)
+}
+
+fn local_api_key(provider: &str) -> Option<String> {
+    let provider = canonical_provider(provider);
+    let creds = load_local_credentials();
+    creds
+        .api_keys
+        .get(provider)
+        .cloned()
+        .filter(|v| !v.trim().is_empty())
+}
+
+fn local_cli_auth_env(provider: &str) -> Option<HashMap<String, String>> {
+    let provider = canonical_provider(provider);
+    let creds = load_local_credentials();
+    creds.cli_env.get(provider).cloned().filter(|m| !m.is_empty())
+}
+
+/// Read provider API key from Forge local credentials, if present.
+pub fn local_api_key_for_provider(provider: &str) -> Option<String> {
+    local_api_key(provider)
+}
+
+/// Read CLI auth environment map from Forge local credentials, if present.
+pub fn local_cli_auth_vars_for_provider(provider: &str) -> Option<HashMap<String, String>> {
+    local_cli_auth_env(provider)
+}
+
+/// Apply stored CLI auth variables into this process environment.
+/// Returns the number of env vars injected.
+pub fn apply_local_cli_auth_env(provider: &str) -> usize {
+    let provider = canonical_provider(provider);
+
+    let Some(env_map) = local_cli_auth_env(provider) else {
+        return 0;
+    };
+
+    // Clear known keys first to avoid stale values when switching token types.
+    for key in cli_env_keys(provider) {
+        std::env::remove_var(key);
+    }
+
+    let mut applied = 0usize;
+    for (k, v) in env_map {
+        if v.trim().is_empty() {
+            continue;
+        }
+        std::env::set_var(&k, &v);
+        applied += 1;
+    }
+    applied
 }
 
 /// List all secret names stored in the Signet daemon
@@ -61,18 +239,57 @@ pub async fn discover_available_providers(
     client: Option<&SignetClient>,
 ) -> Vec<DiscoveredProvider> {
     let mut found = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
 
-    // 1. Check daemon secret store (preferred — encrypted, managed)
+    // 1. Environment variables (highest precedence; easy to override per shell)
+    for provider in API_PROVIDERS {
+        for env_name in provider_env_keys(provider) {
+            if let Ok(val) = std::env::var(env_name) {
+                if !val.trim().is_empty() {
+                    debug!("Found {env_name} in environment for {provider}");
+                    found.push(DiscoveredProvider {
+                        provider: provider.to_string(),
+                        secret_name: env_name.to_string(),
+                        source: KeySource::Environment,
+                    });
+                    seen.insert(provider.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. Forge local credential store (provider -> api key)
+    for provider in API_PROVIDERS {
+        if seen.contains(*provider) {
+            continue;
+        }
+        if local_api_key(provider).is_some() {
+            found.push(DiscoveredProvider {
+                provider: provider.to_string(),
+                secret_name: provider_to_secret_name(provider),
+                source: KeySource::LocalStore,
+            });
+            seen.insert(provider.to_string());
+        }
+    }
+
+    // 3. Signet daemon secret store (optional fallback)
     if let Some(client) = client {
         match list_daemon_secrets(client).await {
             Ok(daemon_secrets) => {
-                for (provider, secret_name) in PROVIDER_SECRETS {
-                    if daemon_secrets.iter().any(|s| s == secret_name) {
+                for provider in API_PROVIDERS {
+                    if seen.contains(*provider) {
+                        continue;
+                    }
+                    let matched = provider_env_keys(provider)
+                        .iter()
+                        .find(|key| daemon_secrets.iter().any(|s| s == **key));
+                    if let Some(secret_name) = matched {
                         debug!("Found {secret_name} in daemon for {provider}");
                         found.push(DiscoveredProvider {
                             provider: provider.to_string(),
-                            secret_name: secret_name.to_string(),
+                            secret_name: (*secret_name).to_string(),
                             source: KeySource::Daemon,
                         });
                         seen.insert(provider.to_string());
@@ -85,25 +302,7 @@ pub async fn discover_available_providers(
         }
     }
 
-    // 2. Check environment variables for providers not found in daemon
-    for (provider, secret_name) in PROVIDER_SECRETS {
-        if seen.contains(*provider) {
-            continue;
-        }
-        if let Ok(val) = std::env::var(secret_name) {
-            if !val.is_empty() {
-                debug!("Found {secret_name} in environment for {provider}");
-                found.push(DiscoveredProvider {
-                    provider: provider.to_string(),
-                    secret_name: secret_name.to_string(),
-                    source: KeySource::Environment,
-                });
-                seen.insert(provider.to_string());
-            }
-        }
-    }
-
-    // 3. Detect installed CLI tools
+    // 4. Detect installed CLI tools
     let cli_checks: &[(&str, &str)] = &[
         ("claude-cli", "claude"),
         ("codex-cli", "codex"),
@@ -119,10 +318,15 @@ pub async fn discover_available_providers(
             if output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path.is_empty() {
+                    let auth_tag = if local_cli_auth_env(provider_name).is_some() {
+                        "token saved"
+                    } else {
+                        "installed"
+                    };
                     debug!("Found CLI tool: {binary} at {path}");
                     found.push(DiscoveredProvider {
                         provider: provider_name.to_string(),
-                        secret_name: format!("{binary} (installed)"),
+                        secret_name: format!("{binary} ({auth_tag})"),
                         source: KeySource::Cli { path },
                     });
                 }
@@ -130,7 +334,7 @@ pub async fn discover_available_providers(
         }
     }
 
-    // 4. Ollama is always available (local, no key)
+    // 5. Ollama is always available (local, no key)
     if !seen.contains("ollama") {
         found.push(DiscoveredProvider {
             provider: "ollama".to_string(),
@@ -148,6 +352,8 @@ pub async fn resolve_api_key(
     client: Option<&SignetClient>,
     provider: &str,
 ) -> Result<String, ForgeError> {
+    let provider = canonical_provider(provider);
+
     if provider == "ollama" {
         return Ok(String::new());
     }
@@ -157,61 +363,69 @@ pub async fn resolve_api_key(
         return Ok(String::new());
     }
 
-    let secret_name = provider_to_secret_name(provider);
-
-    // Environment variable — fastest, no network round-trip
-    if let Ok(key) = std::env::var(&secret_name) {
-        if !key.is_empty() {
-            debug!("Resolved {secret_name} from environment");
-            return Ok(key);
+    // 1) Environment variables
+    for env_name in provider_env_keys(provider) {
+        if let Ok(key) = std::env::var(env_name) {
+            if !key.trim().is_empty() {
+                debug!("Resolved {env_name} from environment");
+                return Ok(key);
+            }
         }
     }
 
-    // Daemon secret store — exec printenv to read the injected value
+    // 2) Forge local credential store
+    if let Some(key) = local_api_key(provider) {
+        debug!("Resolved {} from local Forge credentials", provider);
+        return Ok(key);
+    }
+
+    // 3) Signet daemon secret store — optional fallback
     if let Some(client) = client {
-        let body = serde_json::json!({
-            "command": format!("printenv {secret_name}"),
-            "secrets": {
-                &secret_name: &secret_name,
-            }
-        });
-
-        match client.post("/api/secrets/exec", &body).await {
-            Ok(result) => {
-                let code = result.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-                let stdout = result
-                    .get("stdout")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-
-                if code == 0 && !stdout.is_empty() {
-                    debug!("Resolved {secret_name} from daemon secret store");
-                    return Ok(stdout);
+        for env_name in provider_env_keys(provider) {
+            let env_name = *env_name;
+            let body = serde_json::json!({
+                "command": format!("printenv {env_name}"),
+                "secrets": {
+                    env_name: env_name,
                 }
-                debug!(
-                    "Daemon exec returned code={code}, stdout empty={} for {secret_name}",
-                    stdout.is_empty()
-                );
-            }
-            Err(e) => {
-                debug!("Daemon secret exec failed for {secret_name}: {e}");
+            });
+
+            match client.post("/api/secrets/exec", &body).await {
+                Ok(result) => {
+                    let code = result.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+                    let stdout = result
+                        .get("stdout")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+
+                    if code == 0 && !stdout.is_empty() {
+                        debug!("Resolved {env_name} from daemon secret store");
+                        return Ok(stdout);
+                    }
+                    debug!(
+                        "Daemon exec returned code={code}, stdout empty={} for {env_name}",
+                        stdout.is_empty()
+                    );
+                }
+                Err(e) => {
+                    debug!("Daemon secret exec failed for {env_name}: {e}");
+                }
             }
         }
     }
 
     Err(ForgeError::ApiKeyMissing(format!(
-        "No API key found for {provider} ({secret_name})"
+        "No API key found for {provider} ({})",
+        provider_to_secret_name(provider)
     )))
 }
 
 /// Map provider name to its expected secret/env var name
 pub fn provider_to_secret_name(provider: &str) -> String {
-    for (p, s) in PROVIDER_SECRETS {
-        if *p == provider {
-            return s.to_string();
-        }
+    if let Some(name) = provider_env_keys(provider).first() {
+        return (*name).to_string();
     }
     format!("{}_API_KEY", provider.to_uppercase())
 }
@@ -221,7 +435,7 @@ pub fn default_model_for_provider(provider: &str) -> &'static str {
     match provider {
         "anthropic" | "claude-cli" => "claude-sonnet-4-6",
         "openai" | "codex-cli" => "gpt-4o",
-        "gemini" | "gemini-cli" => "gemini-2.5-flash",
+        "gemini" | "google" | "gemini-cli" => "gemini-2.5-flash",
         "groq" => "llama-3.3-70b-versatile",
         "ollama" => "qwen3:4b",
         "openrouter" => "anthropic/claude-sonnet-4-6",

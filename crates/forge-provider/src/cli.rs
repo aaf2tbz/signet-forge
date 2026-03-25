@@ -271,6 +271,8 @@ impl Provider for CliProvider {
 
             // Claude CLI: track input tokens from message_start for usage reporting
             let mut claude_input_tokens: usize = 0;
+            // Claude CLI: track whether text was already sent via assistant event
+            let mut claude_text_sent = false;
 
             // Codex function_call tracking: map call_id → tool name,
             // and track which calls already emitted ToolUseStart
@@ -349,14 +351,21 @@ impl Provider for CliProvider {
 
                         match event_type {
                             "assistant" => {
-                                if let Some(msg) = parsed.get("message") {
-                                    let subtype = msg
-                                        .get("type")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    if subtype == "text" {
-                                        if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
-                                            send!(StreamEvent::TextDelta(text.to_string()));
+                                // Extract text from message.content[] array
+                                // Format: {"message": {"content": [{"type": "text", "text": "..."}]}}
+                                if let Some(content) = parsed
+                                    .pointer("/message/content")
+                                    .and_then(|v| v.as_array())
+                                {
+                                    for block in content {
+                                        let btype = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                        if btype == "text" {
+                                            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                                                if !text.is_empty() {
+                                                    claude_text_sent = true;
+                                                    send!(StreamEvent::TextDelta(text.to_string()));
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -449,9 +458,12 @@ impl Provider for CliProvider {
                                 }
                             }
                             "result" => {
-                                if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
-                                    if !result.is_empty() {
-                                        let _ = tx.blocking_send(StreamEvent::TextDelta(result.to_string()));
+                                // Only send text if not already sent via assistant event
+                                if !claude_text_sent {
+                                    if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
+                                        if !result.is_empty() {
+                                            let _ = tx.blocking_send(StreamEvent::TextDelta(result.to_string()));
+                                        }
                                     }
                                 }
                                 break 'outer;

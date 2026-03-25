@@ -1,3 +1,5 @@
+mod auth;
+
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
@@ -10,8 +12,8 @@ use crossterm::{
 use forge_provider::create_provider;
 use forge_signet::config::{build_agent_identity_prompt, build_identity_prompt, load_agent_config};
 use forge_signet::secrets::{
-    default_model_for_provider, discover_available_providers, resolve_api_key, DiscoveredProvider,
-    KeySource,
+    apply_local_cli_auth_env, default_model_for_provider, discover_available_providers,
+    resolve_api_key, DiscoveredProvider, KeySource,
 };
 use forge_signet::SignetClient;
 use forge_tui::App;
@@ -45,6 +47,18 @@ struct Cli {
     /// Non-interactive mode: send a single prompt and print the response
     #[arg(short = 'p', long = "prompt")]
     prompt: Option<String>,
+
+    /// Launch interactive provider auth setup (browser login + API key paste)
+    #[arg(long)]
+    auth: bool,
+
+    /// Run auth setup, then exit without starting Forge
+    #[arg(long)]
+    auth_only: bool,
+
+    /// Auth a specific provider directly (e.g. anthropic, openai, claude-cli)
+    #[arg(long)]
+    auth_provider: Option<String>,
 
     /// Color theme (signet-dark, signet-light, midnight, amber)
     #[arg(long, default_value = "signet-dark")]
@@ -86,6 +100,14 @@ async fn main() -> Result<()> {
             .init();
     }
 
+    // Optional: provider auth setup (local Forge credentials + CLI browser login)
+    if cli.auth || cli.auth_only || cli.auth_provider.is_some() {
+        auth::run_auth_wizard(cli.auth_provider.as_deref()).await?;
+        if cli.auth_only {
+            return Ok(());
+        }
+    }
+
     // Signet onboarding — check install, run setup, start daemon
     if !cli.no_daemon {
         ensure_signet(&cli.daemon_url).await;
@@ -117,7 +139,27 @@ async fn main() -> Result<()> {
     };
 
     // Discover available providers — API keys, CLI tools, local models
-    let available = discover_available_providers(signet_client.as_ref()).await;
+    let mut available = discover_available_providers(signet_client.as_ref()).await;
+
+    // If nothing but bare Ollama is available, offer Forge auth setup.
+    if cli.prompt.is_none() && !has_non_ollama_provider(&available) {
+        eprintln!();
+        eprintln!("  {}", "Forge — Provider auth needed".bold());
+        eprintln!();
+        eprintln!("  No authenticated cloud providers were detected.");
+        eprintln!("  You can log in via browser or paste API keys directly into Forge.");
+        eprintln!();
+        eprint!("  Run Forge auth setup now? [Y/n]: ");
+        let _ = std::io::stderr().flush();
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_ok() {
+            let choice = input.trim().to_lowercase();
+            if choice.is_empty() || choice.starts_with('y') {
+                auth::run_auth_wizard(None).await?;
+                available = discover_available_providers(signet_client.as_ref()).await;
+            }
+        }
+    }
 
     // Load persistent settings (model, provider, effort from last session)
     let settings = forge_tui::settings::Settings::load();
@@ -150,13 +192,14 @@ async fn main() -> Result<()> {
         active_cli_path
     {
         // CLI provider — no API key needed, the CLI handles auth
+        let injected = apply_local_cli_auth_env(&provider_name);
         let kind = match provider_name.as_str() {
             "claude-cli" => forge_provider::cli::CliKind::Claude,
             "codex-cli" => forge_provider::cli::CliKind::Codex,
             "gemini-cli" => forge_provider::cli::CliKind::Gemini,
             _ => unreachable!(),
         };
-        info!("Using CLI provider: {cli_path}");
+        info!("Using CLI provider: {cli_path} (injected {injected} auth env vars)");
         Arc::from(forge_provider::create_cli_provider(kind, cli_path, &model))
     } else {
         // API provider — resolve key
@@ -169,8 +212,9 @@ async fn main() -> Result<()> {
                     anyhow::anyhow!(
                         "No API key for {provider_name}.\n\n\
                          To fix this, either:\n  \
+                         • Run Forge auth setup: forge --auth --auth-provider {provider_name}\n  \
                          • Set {secret_name} in your environment\n  \
-                         • Store it in Signet:  signet secret set {secret_name}\n  \
+                         • (Optional) Store in Signet: signet secret set {secret_name}\n  \
                          • Use an installed CLI:  forge --provider claude-cli\n  \
                          • Use a local model:    forge --provider ollama --model qwen3:4b"
                     )
@@ -427,10 +471,10 @@ fn select_provider(cli: &Cli, available: &[DiscoveredProvider]) -> Result<(Strin
         eprintln!("  No API keys or CLI tools were detected.");
         eprintln!();
         eprintln!("  To get started:");
-        eprintln!("    1. Install a CLI:       brew install claude / npm i -g @anthropic-ai/claude-code");
-        eprintln!("    2. Set an API key:      export ANTHROPIC_API_KEY=sk-...");
-        eprintln!("    3. Store in Signet:      signet secret set ANTHROPIC_API_KEY");
-        eprintln!("    4. Use a local model:    forge --provider ollama --model qwen3:4b");
+        eprintln!("    1. Run auth wizard:      forge --auth");
+        eprintln!("    2. Set env var manually: export ANTHROPIC_API_KEY=sk-...");
+        eprintln!("    3. Use a CLI provider:   forge --provider claude-cli");
+        eprintln!("    4. Use local model:      forge --provider ollama --model qwen3:4b");
         eprintln!();
         std::process::exit(1);
     }
@@ -640,4 +684,8 @@ fn find_cli_path(provider_name: &str, available: &[DiscoveredProvider]) -> Optio
         }
         None
     })
+}
+
+fn has_non_ollama_provider(available: &[DiscoveredProvider]) -> bool {
+    available.iter().any(|p| p.provider != "ollama")
 }

@@ -180,6 +180,10 @@ Model picker (Ctrl+O) always shows API + CLI models. Daemon registry models merg
 
 ```bash
 forge                                    # Interactive — auto-detects everything
+forge --auth                             # Auth wizard (browser login + API key paste)
+forge --auth --auth-provider openai      # Auth one provider directly
+forge --auth --auth-provider claude-cli  # Claude CLI auth (paste token or browser login)
+forge --auth-only                        # Configure auth, then exit
 forge --provider claude-cli              # Use Claude Code CLI
 forge --provider ollama --model qwen3:4b # Local model
 forge --model claude-opus-4-6            # Specific model (infers provider)
@@ -188,6 +192,18 @@ forge --resume                           # Continue last session
 forge --theme midnight                   # Set theme
 forge --no-daemon                        # Standalone, no Signet
 ```
+
+### Auth setup flow
+
+- **Provider multi-select UI** in terminal: `↑/↓` move, `Space` toggle, `Enter` continue
+- **API providers**: opens key page + paste API key
+- **CLI providers** (`claude-cli`, `codex-cli`, `gemini-cli`): choose between
+  1. **Paste auth/API token** (saved locally and injected into CLI env)
+  2. **Run auth login flow** (browser/device login)
+
+Forge stores local auth values in your platform config dir:
+- macOS: `~/Library/Application Support/forge/credentials.json`
+- Linux: `~/.config/forge/credentials.json`
 
 ---
 
@@ -223,6 +239,7 @@ Type `/` and press `Tab` to complete. Arguments for `/effort`, `/theme`, `/model
 | `/recall <query>` | Search memories |
 | `/remember <text>` | Store a memory |
 | `/model` | Open model picker |
+| `/auth` | Show provider auth setup instructions |
 | `/effort <level>` | Reasoning effort (low/medium/high) — persists |
 | `/theme <name>` | Switch theme — persists |
 | `/forge-bypass` | Toggle CLI permission bypass |
@@ -294,6 +311,7 @@ Type `/` and press `Tab` to complete. Arguments for `/effort`, `/theme`, `/model
 ### Providers
 - **PTY-based CLI streaming** — real pseudo-terminal, 64KB buffer, no buffering delays
 - **CLI tool visibility** — tool cards render from CLI stream-json events
+- **CLI auth choices** — token paste or interactive browser login per provider
 - **Permission bypass** — `/forge-bypass` mid-session toggle
 
 ### Overlays

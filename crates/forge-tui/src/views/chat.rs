@@ -47,6 +47,8 @@ pub struct ChatView<'a> {
     pub agent_name: &'a str,
     /// Total memories in Signet (for welcome screen readout)
     pub total_memories: usize,
+    /// Animation tick counter (for blinking cursor)
+    pub tick: usize,
     /// Active color theme
     pub theme: &'a Theme,
 }
@@ -160,12 +162,17 @@ impl<'a> Widget for ChatView<'a> {
                         if first {
                             lines.push(Line::from(vec![
                                 Span::styled(
-                                    "  > ",
+                                    "  ❯ ",
                                     Style::default()
-                                        .fg(t.user)
+                                        .fg(t.accent)
                                         .add_modifier(Modifier::BOLD),
                                 ),
-                                Span::styled(line, Style::default().fg(t.fg_bright)),
+                                Span::styled(
+                                    line,
+                                    Style::default()
+                                        .fg(t.fg_bright)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
                             ]));
                             first = false;
                         } else {
@@ -178,13 +185,21 @@ impl<'a> Widget for ChatView<'a> {
                 }
                 ChatEntry::AssistantText(text) => {
                     lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        format!("  [{}]", self.agent_name),
-                        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            "  ◆ ",
+                            Style::default().fg(t.accent),
+                        ),
+                        Span::styled(
+                            self.agent_name,
+                            Style::default()
+                                .fg(t.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
                     let md_lines = render_markdown(text, t);
                     for md_line in md_lines {
-                        let mut indented_spans = vec![Span::raw("  ")];
+                        let mut indented_spans = vec![Span::raw("    ")];
                         indented_spans.extend(md_line.spans);
                         lines.push(Line::from(indented_spans));
                     }
@@ -193,7 +208,7 @@ impl<'a> Widget for ChatView<'a> {
                     lines.push(Line::from(""));
                     let md_lines = render_markdown(text, t);
                     for md_line in md_lines {
-                        let mut indented_spans = vec![Span::raw("  ")];
+                        let mut indented_spans = vec![Span::raw("    ")];
                         indented_spans.extend(md_line.spans);
                         lines.push(Line::from(indented_spans));
                     }
@@ -205,16 +220,15 @@ impl<'a> Widget for ChatView<'a> {
                         ToolStatus::Error => ("✗", t.error),
                     };
                     let mut spans = vec![
-                        Span::raw("  "),
+                        Span::styled("    ", Style::default()),
                         Span::styled(indicator, Style::default().fg(color)),
-                        Span::styled(" [", Style::default().fg(t.muted)),
+                        Span::styled(" ", Style::default()),
                         Span::styled(
                             name,
                             Style::default()
                                 .fg(t.tool)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled("]", Style::default().fg(t.muted)),
                     ];
                     if let Some(d) = detail {
                         spans.push(Span::styled(
@@ -252,41 +266,43 @@ impl<'a> Widget for ChatView<'a> {
                                 let file_part = display[..colon].to_string();
                                 let rest = display[colon..].to_string();
                                 lines.push(Line::from(vec![
-                                    Span::raw("    "),
+                                    Span::styled("      │ ", Style::default().fg(t.border)),
                                     Span::styled(file_part, Style::default().fg(t.accent)),
                                     Span::styled(rest, style),
                                 ]));
                                 continue;
                             }
                         }
-                        lines.push(Line::from(Span::styled(
-                            format!("    {display}"),
-                            style,
-                        )));
+                        lines.push(Line::from(vec![
+                            Span::styled("      │ ", Style::default().fg(t.border)),
+                            Span::styled(display, style),
+                        ]));
                     }
                     let total_lines = output.lines().count();
                     if total_lines > max_lines {
-                        lines.push(Line::from(Span::styled(
-                            format!("    ... ({} more lines)", total_lines - max_lines),
-                            Style::default()
-                                .fg(t.muted)
-                                .add_modifier(Modifier::ITALIC),
-                        )));
+                        lines.push(Line::from(vec![
+                            Span::styled("      └ ", Style::default().fg(t.border)),
+                            Span::styled(
+                                format!("{} more lines", total_lines - max_lines),
+                                Style::default().fg(t.muted),
+                            ),
+                        ]));
                     }
                 }
                 ChatEntry::Error(msg) => {
                     lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        format!("  Error: {msg}"),
-                        Style::default().fg(t.error).add_modifier(Modifier::BOLD),
-                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled("  ✗ ", Style::default().fg(t.error)),
+                        Span::styled(
+                            msg,
+                            Style::default().fg(t.error).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
                 }
                 ChatEntry::Status(msg) => {
                     lines.push(Line::from(Span::styled(
-                        format!("  {msg}"),
-                        Style::default()
-                            .fg(t.muted)
-                            .add_modifier(Modifier::ITALIC),
+                        format!("    {msg}"),
+                        Style::default().fg(t.muted),
                     )));
                 }
             }
@@ -295,21 +311,33 @@ impl<'a> Widget for ChatView<'a> {
         // Streaming text (currently being generated)
         if !self.streaming_text.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  [{}]", self.agent_name),
-                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "  ◆ ",
+                    Style::default().fg(t.accent),
+                ),
+                Span::styled(
+                    self.agent_name,
+                    Style::default()
+                        .fg(t.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
             let md_lines = render_markdown(self.streaming_text, t);
             for md_line in md_lines {
-                let mut indented_spans = vec![Span::raw("  ")];
+                let mut indented_spans = vec![Span::raw("    ")];
                 indented_spans.extend(md_line.spans);
                 lines.push(Line::from(indented_spans));
             }
-            // Cursor indicator
-            lines.push(Line::from(Span::styled(
-                "  ▌",
-                Style::default().fg(t.assistant),
-            )));
+            // Blinking cursor — toggles every ~500ms (10 ticks at 50ms)
+            if (self.tick / 10) % 2 == 0 {
+                lines.push(Line::from(Span::styled(
+                    "    ●",
+                    Style::default().fg(t.accent),
+                )));
+            } else {
+                lines.push(Line::from(""));
+            }
         }
 
         // Activity indicator (animated spinner during processing)

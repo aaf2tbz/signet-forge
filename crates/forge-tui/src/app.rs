@@ -3,6 +3,7 @@ use crate::keybinds::KeyBindConfig;
 use crate::views::chat::{ChatEntry, ChatView, ToolStatus};
 use crate::views::command_palette::{CommandKind as PaletteCommandKind, CommandPalette};
 use crate::views::dashboard_nav::DashboardNav;
+use crate::views::forge_usage::ForgeUsage;
 use crate::views::keybind_editor::KeybindEditor;
 use crate::views::dashboard_panel::DashboardPanel;
 use crate::views::model_picker::ModelPicker;
@@ -17,7 +18,7 @@ use forge_agent::{
 };
 use forge_provider::{self, Provider};
 use forge_signet::hooks::SessionHooks;
-use forge_signet::secrets::resolve_api_key;
+use forge_signet::secrets::{apply_local_cli_auth_env, resolve_api_key};
 use forge_signet::{ConfigEvent, ConfigWatcher, SignetClient};
 use ratatui::{
     layout::{Constraint, Layout},
@@ -117,8 +118,13 @@ pub struct App {
     cursor: usize,
     /// Chat history entries
     entries: Vec<ChatEntry>,
-    /// Currently streaming text
+    /// Currently streaming text (visible on screen)
     streaming_text: String,
+    /// Pending text buffer — text arrives in bursts from CLI, dripped out
+    /// gradually to give a live-streaming feel (chars per frame)
+    pending_text: String,
+    /// Set when TurnComplete arrives but pending_text still dripping
+    turn_complete_pending: bool,
     /// Chat scroll offset
     scroll_offset: u16,
     /// Shared session
@@ -183,6 +189,8 @@ pub struct App {
     session_browser: Option<SessionBrowser>,
     /// Dashboard panel overlay (F2)
     dashboard_panel: Option<DashboardPanel>,
+    /// Usage overlay (/forge-usage)
+    forge_usage: Option<ForgeUsage>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
     /// Signet client for API key resolution on model switch
@@ -391,6 +399,8 @@ impl App {
             cursor: 0,
             entries: Vec::new(),
             streaming_text: String::new(),
+            pending_text: String::new(),
+            turn_complete_pending: false,
             scroll_offset: 0,
             session,
             model,
@@ -424,6 +434,7 @@ impl App {
             keybind_editor: None,
             session_browser: None,
             dashboard_panel: None,
+            forge_usage: None,
             skills,
             signet_client,
             permissions,
@@ -550,6 +561,46 @@ impl App {
                 self.handle_agent_event(event);
             }
 
+            // Drip streaming — release pending text word-by-word for live feel.
+            // Find the next word boundary (space/newline) after a minimum offset,
+            // so text never cuts mid-word.
+            if !self.pending_text.is_empty() {
+                // Min 4 chars, then extend to next word boundary
+                let min_chars = 4;
+                let min_byte = self
+                    .pending_text
+                    .char_indices()
+                    .nth(min_chars)
+                    .map(|(i, _)| i)
+                    .unwrap_or(self.pending_text.len());
+                // Find next space or newline after min_byte
+                let boundary = self.pending_text[min_byte..]
+                    .find(|c: char| c == ' ' || c == '\n')
+                    .map(|pos| min_byte + pos + 1) // include the space
+                    .unwrap_or(self.pending_text.len().min(min_byte + 20)); // cap at ~20 extra chars
+                let boundary = boundary.min(self.pending_text.len());
+                let chunk: String = self.pending_text.drain(..boundary).collect();
+                self.streaming_text.push_str(&chunk);
+                // Safety: prevent unbounded growth
+                if self.streaming_text.len() > 512 * 1024 {
+                    self.entries
+                        .push(ChatEntry::AssistantText(self.streaming_text.clone()));
+                    self.streaming_text.clear();
+                }
+            }
+
+            // Deferred turn completion — commit text after drip buffer empties
+            if self.turn_complete_pending && self.pending_text.is_empty() {
+                if !self.streaming_text.is_empty() {
+                    self.entries
+                        .push(ChatEntry::AssistantText(self.streaming_text.clone()));
+                    self.streaming_text.clear();
+                }
+                self.processing = false;
+                self.processing_phase = ProcessingPhase::Idle;
+                self.turn_complete_pending = false;
+            }
+
             // Safety: if agent task finished but processing is still true,
             // the TurnComplete event was lost — force-reset to unblock input
             if self.processing {
@@ -561,6 +612,9 @@ impl App {
                         }
                         // Still stuck? Force reset
                         if self.processing {
+                            self.streaming_text.push_str(&self.pending_text);
+                            self.pending_text.clear();
+                            self.turn_complete_pending = false;
                             if !self.streaming_text.is_empty() {
                                 self.entries
                                     .push(ChatEntry::AssistantText(self.streaming_text.clone()));
@@ -799,6 +853,7 @@ impl App {
             activity_line,
             agent_name: &self.agent_name,
             total_memories: self.total_memories,
+            tick: self.tick,
             theme: &self.theme,
         };
         chat.render(chunks[1], frame.buffer_mut());
@@ -905,6 +960,12 @@ impl App {
             let area = frame.area();
             panel.render_themed(area, frame.buffer_mut(), &self.theme);
         }
+
+        // Usage overlay
+        if let Some(usage) = &self.forge_usage {
+            let area = frame.area();
+            usage.render_themed(area, frame.buffer_mut(), &self.theme);
+        }
     }
 
     fn draw_permission_dialog(&self, frame: &mut Frame, dialog: &PermissionDialog) {
@@ -982,6 +1043,12 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // If usage overlay is open, handle its keys
+        if self.forge_usage.is_some() {
+            self.handle_forge_usage_key(key);
+            return;
+        }
+
         // If dashboard panel is open, handle its keys
         if self.dashboard_panel.is_some() {
             self.handle_dashboard_panel_key(key).await;
@@ -1242,6 +1309,29 @@ impl App {
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 // Refresh
                 self.open_dashboard_panel().await;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_forge_usage_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                self.forge_usage = None;
+            }
+            KeyCode::Up => {
+                if let Some(usage) = &mut self.forge_usage {
+                    usage.scroll_up();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(usage) = &mut self.forge_usage {
+                    usage.scroll_down();
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.forge_usage = Some(ForgeUsage::new());
             }
             _ => {}
         }
@@ -1555,6 +1645,11 @@ impl App {
                                 )));
                             }
                         }
+                        "auth" => {
+                            self.entries.push(ChatEntry::Status(
+                                "Run `forge --auth` in your shell to open browser logins or paste API keys for providers.".to_string(),
+                            ));
+                        }
                         "keybinds" => {
                             self.keybind_editor = Some(KeybindEditor::new());
                         }
@@ -1660,6 +1755,9 @@ impl App {
                                 "Permission bypass: {state}{detail}"
                             )));
                             self.save_settings();
+                        }
+                        "forge-usage" => {
+                            self.forge_usage = Some(ForgeUsage::new());
                         }
                         "import-claude" => {
                             self.entries.push(ChatEntry::Status(
@@ -1873,6 +1971,11 @@ impl App {
                         "Type /recall <query> in the input to search memories.".to_string(),
                     ));
                 }
+                "auth" => {
+                    self.entries.push(ChatEntry::Status(
+                        "Run `forge --auth` in your shell to configure provider logins and API keys.".to_string(),
+                    ));
+                }
                 _ => {}
             },
             PaletteCommandKind::Skill(_content) => {
@@ -1938,6 +2041,7 @@ impl App {
         // Create new provider — CLI or API based
         let new_provider: Arc<dyn Provider> = if let Some(cli_path) = &new_cli_path {
             // CLI provider — no API key needed
+            let _ = apply_local_cli_auth_env(provider_name);
             let kind = match provider_name {
                 "claude-cli" => forge_provider::cli::CliKind::Claude,
                 "codex-cli" => forge_provider::cli::CliKind::Codex,
@@ -1965,7 +2069,7 @@ impl App {
                 Ok(key) => key,
                 Err(e) => {
                     self.entries.push(ChatEntry::Error(format!(
-                        "No API key for {provider_name}: {e}"
+                        "No API key for {provider_name}: {e}\nRun `forge --auth --auth-provider {provider_name}` in your shell, then switch again."
                     )));
                     return;
                 }
@@ -2089,12 +2193,8 @@ impl App {
                 if self.processing_phase != ProcessingPhase::Streaming {
                     self.processing_phase = ProcessingPhase::Streaming;
                 }
-                self.streaming_text.push_str(&text);
-                if self.streaming_text.len() > 512 * 1024 {
-                    self.entries
-                        .push(ChatEntry::AssistantText(self.streaming_text.clone()));
-                    self.streaming_text.clear();
-                }
+                // Buffer text for gradual release (drip streaming)
+                self.pending_text.push_str(&text);
                 self.scroll_offset = 0;
             }
             AgentEvent::ToolStart { name, .. } => {
@@ -2107,6 +2207,9 @@ impl App {
                 } else {
                     ProcessingPhase::ExecutingTool(name.clone())
                 };
+                // Flush all pending + streaming text before tool call
+                self.streaming_text.push_str(&self.pending_text);
+                self.pending_text.clear();
                 if !self.streaming_text.is_empty() {
                     self.entries
                         .push(ChatEntry::AssistantText(self.streaming_text.clone()));
@@ -2167,16 +2270,24 @@ impl App {
                 // Token counts are updated in the shared session directly
             }
             AgentEvent::TurnComplete => {
-                if !self.streaming_text.is_empty() {
-                    self.entries
-                        .push(ChatEntry::AssistantText(self.streaming_text.clone()));
-                    self.streaming_text.clear();
+                if self.pending_text.is_empty() {
+                    // No pending text — commit immediately
+                    if !self.streaming_text.is_empty() {
+                        self.entries
+                            .push(ChatEntry::AssistantText(self.streaming_text.clone()));
+                        self.streaming_text.clear();
+                    }
+                    self.processing = false;
+                    self.processing_phase = ProcessingPhase::Idle;
+                } else {
+                    // Pending text still dripping — defer completion
+                    self.turn_complete_pending = true;
                 }
-                self.processing = false;
-                self.processing_phase = ProcessingPhase::Idle;
             }
             AgentEvent::Error(msg) => {
                 self.streaming_text.clear();
+                self.pending_text.clear();
+                self.turn_complete_pending = false;
                 self.entries.push(ChatEntry::Error(msg));
                 self.processing = false;
                 self.processing_phase = ProcessingPhase::Idle;

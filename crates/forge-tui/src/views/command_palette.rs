@@ -58,6 +58,11 @@ impl CommandPalette {
                 description: "Search Signet memories".into(),
                 kind: CommandKind::BuiltIn("recall".into()),
             },
+            CommandEntry {
+                name: "auth".into(),
+                description: "Provider auth setup instructions".into(),
+                kind: CommandKind::BuiltIn("auth".into()),
+            },
         ];
 
         // Add skills

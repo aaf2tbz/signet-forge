@@ -21,6 +21,8 @@ syntect.workspace = true
 arboard = { workspace = true }
 tracing = { workspace = true }
 dirs = { workspace = true }
+rusqlite = { workspace = true }
+chrono = { workspace = true }
 png = { workspace = true }
 unicode-width = "0.2"
 reqwest-eventsource.workspace = true

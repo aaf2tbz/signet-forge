@@ -86,6 +86,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             kind: CommandKind::Internal("theme"),
         },
         SignetCommand {
+            key: "auth",
+            label: "/auth",
+            description: "Show provider auth setup instructions",
+            kind: CommandKind::Internal("auth"),
+        },
+        SignetCommand {
             key: "effort",
             label: "/effort <level>",
             description: "Set reasoning effort (low, medium, high)",
@@ -120,6 +126,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             label: "/signet-save-agent <path>",
             description: "Export your entire Signet agent to a zip file",
             kind: CommandKind::Internal("signet-save-agent"),
+        },
+        SignetCommand {
+            key: "forge-usage",
+            label: "/forge-usage",
+            description: "Show token usage across Codex and Claude Code",
+            kind: CommandKind::Internal("forge-usage"),
         },
         // Status & Diagnostics
         SignetCommand {
@@ -411,7 +423,14 @@ impl CommandPicker {
 pub fn help_text() -> String {
     let mut text = String::new();
     text.push_str("◆ Signet Commands\n\n");
-    text.push_str("  Status & Diagnostics:\n");
+    text.push_str("  Usage:\n");
+    for cmd in all_commands()
+        .iter()
+        .filter(|c| matches!(c.key, "forge-usage" | "auth"))
+    {
+        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
+    }
+    text.push_str("\n  Status & Diagnostics:\n");
     for cmd in all_commands().iter().filter(|c| {
         matches!(
             c.key,
