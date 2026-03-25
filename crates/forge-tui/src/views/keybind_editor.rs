@@ -1,5 +1,5 @@
 use crate::keybinds::{KeyBindConfig, KEYBIND_ACTIONS};
-use crate::theme::Theme;
+use crate::{chrome, theme::Theme};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -110,13 +110,7 @@ impl KeybindEditor {
         let popup = Rect::new(x, y, width, height);
 
         Clear.render(popup, buf);
-        for row in popup.y..popup.y + popup.height {
-            for col in popup.x..popup.x + popup.width {
-                if col < buf.area().width && row < buf.area().height {
-                    buf[(col, row)].set_bg(theme.dialog_bg);
-                }
-            }
-        }
+        chrome::render_overlay_chrome(buf, popup, theme);
 
         let block = Block::default()
             .title(" Key Bindings ")
@@ -151,25 +145,25 @@ impl KeybindEditor {
                 } else {
                     theme.selected_bg
                 };
+                let marker_style = if self.capturing {
+                    Style::default().fg(theme.fg_bright).bg(bg).add_modifier(Modifier::BOLD)
+                } else {
+                    chrome::selected_marker(theme)
+                };
+                let primary_style = if self.capturing {
+                    Style::default().fg(theme.selected_fg).bg(bg).add_modifier(Modifier::BOLD)
+                } else {
+                    chrome::selected_primary(theme)
+                };
+                let secondary_style = if self.capturing {
+                    Style::default().fg(theme.selected_fg).bg(bg)
+                } else {
+                    chrome::selected_secondary(theme)
+                };
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        " ▸ ",
-                        Style::default()
-                            .fg(theme.selected_fg)
-                            .bg(bg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("{:<20}", display),
-                        Style::default()
-                            .fg(theme.selected_fg)
-                            .bg(bg)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        combo.to_string(),
-                        Style::default().fg(theme.selected_fg).bg(bg),
-                    ),
+                    Span::styled(" ▸ ", marker_style),
+                    Span::styled(format!("{:<20}", display), primary_style),
+                    Span::styled(combo.to_string(), secondary_style),
                 ]));
             } else {
                 lines.push(Line::from(vec![

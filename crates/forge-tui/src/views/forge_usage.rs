@@ -1,4 +1,4 @@
-use crate::theme::Theme;
+use crate::{chrome, theme::Theme};
 use chrono::Datelike;
 use ratatui::{
     buffer::Buffer,
@@ -67,13 +67,7 @@ impl ForgeUsage {
         let popup = Rect::new(x, y, width, height);
 
         Clear.render(popup, buf);
-        for row in popup.y..popup.y + popup.height {
-            for col in popup.x..popup.x + popup.width {
-                if col < buf.area().width && row < buf.area().height {
-                    buf[(col, row)].set_bg(theme.dialog_bg);
-                }
-            }
-        }
+        chrome::render_overlay_chrome(buf, popup, theme);
 
         let block = Block::default()
             .title(" Forge Usage ")

@@ -1,4 +1,4 @@
-use crate::theme::Theme;
+use crate::{chrome, theme::Theme};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -120,7 +120,7 @@ impl DashboardPanel {
             if i == self.tab {
                 tab_spans.push(Span::styled(
                     format!(" {name} "),
-                    Style::default().fg(theme.selected_fg).bg(theme.selected_bg).add_modifier(Modifier::BOLD),
+                    chrome::selected_primary(theme),
                 ));
             } else {
                 tab_spans.push(Span::styled(

@@ -1,4 +1,5 @@
 pub mod app;
+pub mod chrome;
 pub mod input;
 pub mod keybinds;
 pub mod mcp_config;

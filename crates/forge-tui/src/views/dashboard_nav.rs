@@ -1,4 +1,4 @@
-use crate::theme::Theme;
+use crate::{chrome, theme::Theme};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -191,14 +191,7 @@ impl DashboardNav {
         let popup = Rect::new(x, y, width, height);
 
         Clear.render(popup, buf);
-        // Fill with themed dialog background
-        for row in popup.y..popup.y + popup.height {
-            for col in popup.x..popup.x + popup.width {
-                if col < buf.area().width && row < buf.area().height {
-                    buf[(col, row)].set_bg(theme.dialog_bg);
-                }
-            }
-        }
+        chrome::render_overlay_chrome(buf, popup, theme);
 
         let block = Block::default()
             .title(" Dashboard (Ctrl+D) ")
@@ -244,23 +237,15 @@ impl DashboardNav {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!(" {marker} "),
-                        Style::default()
-                            .fg(theme.selected_fg)
-                            .bg(theme.selected_bg)
-                            .add_modifier(Modifier::BOLD),
+                        chrome::selected_marker(theme),
                     ),
                     Span::styled(
                         format!("{:<18}", page.label),
-                        Style::default()
-                            .fg(theme.selected_fg)
-                            .bg(theme.selected_bg)
-                            .add_modifier(Modifier::BOLD),
+                        chrome::selected_marker(theme),
                     ),
                     Span::styled(
                         page.description,
-                        Style::default()
-                            .fg(theme.selected_fg)
-                            .bg(theme.selected_bg),
+                        chrome::selected_secondary(theme),
                     ),
                 ]));
             } else {

@@ -1,4 +1,4 @@
-use crate::theme::Theme;
+use crate::{chrome, theme::Theme};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -134,6 +134,7 @@ impl CommandPalette {
         // Fill with themed dialog background
         let bg_block = Block::default().style(Style::default().bg(theme.dialog_bg));
         frame.render_widget(bg_block, dialog_area);
+        chrome::render_overlay_chrome(frame.buffer_mut(), dialog_area, theme);
 
         let filtered = self.filtered_commands();
         let mut lines = Vec::new();
@@ -160,16 +161,13 @@ impl CommandPalette {
         for (i, cmd) in filtered.iter().enumerate() {
             let is_selected = i == self.selected;
             let style = if is_selected {
-                Style::default()
-                    .fg(theme.selected_fg)
-                    .bg(theme.selected_bg)
-                    .add_modifier(Modifier::BOLD)
+                chrome::selected_primary(theme)
             } else {
                 Style::default().fg(theme.fg)
             };
 
             let desc_style = if is_selected {
-                Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
+                chrome::selected_secondary(theme)
             } else {
                 Style::default().fg(theme.muted)
             };
@@ -181,8 +179,8 @@ impl CommandPalette {
 
             lines.push(Line::from(vec![
                 Span::styled(
-                    if is_selected { " > " } else { "   " },
-                    style,
+                    if is_selected { " ▸ " } else { "   " },
+                    if is_selected { chrome::selected_marker(theme) } else { style },
                 ),
                 Span::styled(format!("/{}", cmd.name), style),
                 Span::styled(kind_indicator, desc_style),
