@@ -200,16 +200,11 @@ impl DashboardPanel {
         let label = Style::default().fg(theme.muted);
         let val = Style::default().fg(theme.fg);
 
-        let mode_color = match d.mode.as_str() {
-            "controlled-write" => theme.success,
-            "shadow" => theme.warning,
-            "frozen" => theme.error,
-            _ => theme.muted,
-        };
+        let mode_style = status_style(theme, d.mode.as_str(), None);
 
         lines.push(Line::from(vec![
             Span::styled("  Mode:      ", label),
-            Span::styled(d.mode.clone(), Style::default().fg(mode_color).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{} {}", status_glyph(d.mode.as_str()), d.mode), mode_style),
         ]));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("  Job Queue", Style::default().fg(theme.accent))));
@@ -257,15 +252,11 @@ impl DashboardPanel {
         let label = Style::default().fg(theme.muted);
         let val = Style::default().fg(theme.fg);
 
-        let status_color = match d.status.as_str() {
-            "healthy" => theme.success,
-            "degraded" => theme.warning,
-            _ => theme.error,
-        };
+        let status_style_embed = status_style(theme, d.status.as_str(), Some(d.score));
 
         lines.push(Line::from(vec![
             Span::styled("  Status:     ", label),
-            Span::styled(d.status.clone(), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{} {}", status_glyph(d.status.as_str()), d.status), status_style_embed),
             Span::styled(format!("  (score: {:.0}%)", d.score * 100.0), Style::default().fg(theme.muted)),
         ]));
         lines.push(Line::from(""));
@@ -284,11 +275,10 @@ impl DashboardPanel {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("  Coverage:   ", label),
-            Span::styled(format!("{:.1}%", d.coverage), if d.coverage > 90.0 {
-                Style::default().fg(theme.success)
-            } else {
-                Style::default().fg(theme.warning)
-            }),
+            Span::styled(
+                format!("{:.1}%", d.coverage),
+                if d.coverage > 90.0 { status_style(theme, "healthy", None) } else { status_style(theme, "degraded", None) },
+            ),
         ]));
         lines.push(Line::from(vec![
             Span::styled("  Unembedded: ", label),
@@ -302,11 +292,7 @@ impl DashboardPanel {
         let d = &self.data.diagnostics;
         let label = Style::default().fg(theme.muted);
 
-        let status_color = match d.status.as_str() {
-            "healthy" => theme.success,
-            "degraded" => theme.warning,
-            _ => theme.error,
-        };
+        let diag_style = status_style(theme, d.status.as_str(), Some(d.score));
 
         lines.push(Line::from(vec![
             Span::styled("  System Health", Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)),
@@ -314,11 +300,11 @@ impl DashboardPanel {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("  Status: ", label),
-            Span::styled(d.status.clone(), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{} {}", status_glyph(d.status.as_str()), d.status), diag_style),
         ]));
         lines.push(Line::from(vec![
             Span::styled("  Score:  ", label),
-            Span::styled(format!("{:.0}%", d.score * 100.0), Style::default().fg(status_color)),
+            Span::styled(format!("{:.0}%", d.score * 100.0), diag_style),
         ]));
     }
 
@@ -413,4 +399,30 @@ pub fn parse_dashboard(
     }
 
     data
+}
+
+
+fn status_style(theme: &Theme, status: &str, score: Option<f64>) -> Style {
+    let normalized = status.to_ascii_lowercase();
+    let color = match normalized.as_str() {
+        "healthy" | "ok" | "ready" => theme.success,
+        "degraded" | "warning" | "shadow" => theme.warning,
+        "error" | "failed" | "dead" | "frozen" | "unhealthy" => theme.error,
+        _ => match score {
+            Some(s) if s >= 0.9 => theme.success,
+            Some(s) if s >= 0.7 => theme.warning,
+            Some(_) => theme.error,
+            None => theme.muted,
+        },
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn status_glyph(status: &str) -> &'static str {
+    match status.to_ascii_lowercase().as_str() {
+        "healthy" | "ok" | "ready" => "●",
+        "degraded" | "warning" | "shadow" => "◐",
+        "error" | "failed" | "dead" | "frozen" | "unhealthy" => "◆",
+        _ => "•",
+    }
 }

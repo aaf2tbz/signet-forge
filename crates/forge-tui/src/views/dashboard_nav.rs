@@ -168,6 +168,23 @@ impl DashboardNav {
         }
     }
 
+    pub fn page_up(&mut self, amount: usize) {
+        self.selected = self.selected.saturating_sub(amount.max(1));
+    }
+
+    pub fn page_down(&mut self, amount: usize) {
+        let max = self.pages.len().saturating_sub(1);
+        self.selected = (self.selected + amount.max(1)).min(max);
+    }
+
+    pub fn home(&mut self) {
+        self.selected = 0;
+    }
+
+    pub fn end(&mut self) {
+        self.selected = self.pages.len().saturating_sub(1);
+    }
+
     pub fn selected_page(&self) -> Option<&DashboardPage> {
         self.pages.get(self.selected)
     }
@@ -209,7 +226,16 @@ impl DashboardNav {
         let mut lines = Vec::new();
         let mut last_group = "";
 
-        for (i, page) in self.pages.iter().enumerate() {
+        let list_capacity = inner.height.saturating_sub(4) as usize;
+        let (start, end) = chrome::visible_window(self.pages.len(), self.selected, list_capacity.max(1));
+        if start > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  ↑ {} more", start),
+                Style::default().fg(theme.muted),
+            )));
+        }
+
+        for (i, page) in self.pages.iter().enumerate().skip(start).take(end.saturating_sub(start)) {
             let is_selected = i == self.selected;
 
             // Group header (skip for the first "Open Dashboard" entry)
@@ -266,10 +292,16 @@ impl DashboardNav {
             }
         }
 
-        // Footer
+        if end < self.pages.len() {
+            lines.push(Line::from(Span::styled(
+                format!("  ↓ {} more", self.pages.len() - end),
+                Style::default().fg(theme.muted),
+            )));
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            " ↑/↓ navigate  Enter open  Esc close",
+            format!(" ↑/↓ move  PgUp/PgDn jump  Home/End ends  Enter open   {}/{}", self.selected.saturating_add(1).min(self.pages.len()), self.pages.len()),
             Style::default().fg(theme.muted),
         )));
 

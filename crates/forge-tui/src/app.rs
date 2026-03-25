@@ -1475,14 +1475,34 @@ impl App {
             KeyCode::Esc => {
                 self.session_browser = None;
             }
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 if let Some(browser) = &mut self.session_browser {
                     browser.move_up();
                 }
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 if let Some(browser) = &mut self.session_browser {
                     browser.move_down();
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(browser) = &mut self.session_browser {
+                    browser.page_up(8);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(browser) = &mut self.session_browser {
+                    browser.page_down(8);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(browser) = &mut self.session_browser {
+                    browser.home();
+                }
+            }
+            KeyCode::End => {
+                if let Some(browser) = &mut self.session_browser {
+                    browser.end();
                 }
             }
             KeyCode::Enter => {
@@ -1552,14 +1572,34 @@ impl App {
             KeyCode::Esc => {
                 self.dashboard_nav = None;
             }
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 if let Some(nav) = &mut self.dashboard_nav {
                     nav.move_up();
                 }
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 if let Some(nav) = &mut self.dashboard_nav {
                     nav.move_down();
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(nav) = &mut self.dashboard_nav {
+                    nav.page_up(8);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(nav) = &mut self.dashboard_nav {
+                    nav.page_down(8);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(nav) = &mut self.dashboard_nav {
+                    nav.home();
+                }
+            }
+            KeyCode::End => {
+                if let Some(nav) = &mut self.dashboard_nav {
+                    nav.end();
                 }
             }
             KeyCode::Enter => {

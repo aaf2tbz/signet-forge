@@ -45,6 +45,23 @@ impl SessionBrowser {
         }
     }
 
+    pub fn page_up(&mut self, amount: usize) {
+        self.selected = self.selected.saturating_sub(amount.max(1));
+    }
+
+    pub fn page_down(&mut self, amount: usize) {
+        let max = self.sessions.len().saturating_sub(1);
+        self.selected = (self.selected + amount.max(1)).min(max);
+    }
+
+    pub fn home(&mut self) {
+        self.selected = 0;
+    }
+
+    pub fn end(&mut self) {
+        self.selected = self.sessions.len().saturating_sub(1);
+    }
+
     pub fn selected_session(&self) -> Option<&SavedSession> {
         self.sessions.get(self.selected)
     }
@@ -87,7 +104,16 @@ impl SessionBrowser {
             ]));
             lines.push(Line::from(""));
 
-            for (i, s) in self.sessions.iter().enumerate() {
+            let list_capacity = inner.height.saturating_sub(4) as usize;
+            let (start, end) = chrome::visible_window(self.sessions.len(), self.selected, list_capacity);
+            if start > 0 {
+                lines.push(Line::from(Span::styled(
+                    format!("  ↑ {} more", start),
+                    Style::default().fg(theme.muted),
+                )));
+            }
+
+            for (i, s) in self.sessions.iter().enumerate().skip(start).take(end.saturating_sub(start)) {
                 let is_selected = i == self.selected;
                 let model_display = if s.model.len() > 24 {
                     format!("{}...", &s.model[..21])
@@ -134,9 +160,20 @@ impl SessionBrowser {
             }
         }
 
+        if !self.sessions.is_empty() {
+            let list_capacity = inner.height.saturating_sub(4) as usize;
+            let (_, end) = chrome::visible_window(self.sessions.len(), self.selected, list_capacity);
+            if end < self.sessions.len() {
+                lines.push(Line::from(Span::styled(
+                    format!("  ↓ {} more", self.sessions.len() - end),
+                    Style::default().fg(theme.muted),
+                )));
+            }
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            " ↑/↓ select  Enter resume  Esc close",
+            format!(" ↑/↓ move  PgUp/PgDn jump  Home/End ends  Enter resume   {}/{}", self.selected.saturating_add(1).min(self.sessions.len()), self.sessions.len()),
             Style::default().fg(theme.muted),
         )));
 

@@ -208,6 +208,7 @@ Common defaults:
 - [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md)
 - [docs/SLASH_COMMANDS.md](docs/SLASH_COMMANDS.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [changelogs/README.md](changelogs/README.md)
 
 ## Status
 

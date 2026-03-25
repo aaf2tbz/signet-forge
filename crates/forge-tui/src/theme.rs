@@ -74,11 +74,11 @@ impl Theme {
             // Tool brackets — restrained chrome accent
             tool: Color::Rgb(184, 168, 112),
             // --color-success: #4a7a5e
-            success: Color::Rgb(74, 122, 94),
+            success: Color::Rgb(118, 176, 132),
             // --color-danger: #8a4a48
-            error: Color::Rgb(138, 74, 72),
+            error: Color::Rgb(210, 106, 102),
             // Warning — yellow-leaning but darker than glow
-            warning: Color::Rgb(188, 156, 72),
+            warning: Color::Rgb(230, 188, 92),
             // Code blocks — bright text
             code: Color::Rgb(240, 240, 242),
             // Dim Signet-yellow border for thinner-feeling chrome
@@ -119,12 +119,12 @@ impl Theme {
             assistant: Color::Rgb(58, 56, 50),
             // Tool brackets — restrained chrome accent
             tool: Color::Rgb(132, 112, 56),
-            // --color-success: #4a7a5e (same both modes)
-            success: Color::Rgb(74, 122, 94),
-            // --color-danger: #8a4a48 (same both modes)
-            error: Color::Rgb(138, 74, 72),
-            // Warning
-            warning: Color::Rgb(160, 120, 50),
+            // Polished success tone for light theme
+            success: Color::Rgb(58, 112, 72),
+            // Polished error tone for light theme
+            error: Color::Rgb(154, 66, 64),
+            // Polished warning tone for light theme
+            warning: Color::Rgb(168, 118, 28),
             // Code — bright text (near-black)
             code: Color::Rgb(10, 10, 12),
             // Dim Signet-yellow border for light theme surfaces
