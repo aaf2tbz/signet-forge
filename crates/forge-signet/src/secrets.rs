@@ -241,6 +241,32 @@ fn codex_auth_path() -> PathBuf {
         .join("auth.json")
 }
 
+fn codex_auth_file_has_tokens() -> bool {
+    let path = codex_auth_path();
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&raw) else {
+        return false;
+    };
+    let Some(tokens) = json.get("tokens").and_then(|v| v.as_object()) else {
+        return false;
+    };
+
+    for key in ["access_token", "id_token", "refresh_token", "account_id"] {
+        if tokens
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn sync_codex_auth_file_from_env() -> Result<(), ForgeError> {
     let auth_mode = std::env::var("CODEX_AUTH_MODE").ok();
     let access_token = std::env::var("CODEX_ACCESS_TOKEN").ok();
@@ -409,6 +435,10 @@ async fn detect_cli_auth(provider_name: &str, binary: &str) -> Option<String> {
             }
         }
         "codex-cli" => {
+            if codex_auth_file_has_tokens() {
+                return Some("logged in".to_string());
+            }
+
             let output = Command::new(binary)
                 .args(["login", "status"])
                 .output()
