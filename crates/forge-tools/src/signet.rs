@@ -1,6 +1,7 @@
 use crate::Tool;
 use async_trait::async_trait;
 use forge_core::{ToolCall, ToolDefinition, ToolPermission, ToolResult};
+use forge_signet::daemon_auth_headers_from_env;
 use serde_json::json;
 
 /// Signet memory search — calls daemon /api/memory/recall
@@ -38,7 +39,13 @@ impl Tool for MemorySearchTool {
 
         let client = reqwest::Client::new();
         let body = json!({ "query": query, "limit": limit });
-        match client.post(format!("{}/api/memory/recall", self.daemon_url)).json(&body).send().await {
+        match client
+            .post(format!("{}/api/memory/recall", self.daemon_url))
+            .headers(daemon_auth_headers_from_env(None))
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => match resp.json::<serde_json::Value>().await {
                 Ok(data) => {
                     let results = data.get("results").and_then(|v| v.as_array());
@@ -95,7 +102,13 @@ impl Tool for MemoryStoreTool {
 
         let client = reqwest::Client::new();
         let body = json!({ "content": content });
-        match client.post(format!("{}/api/memory/remember", self.daemon_url)).json(&body).send().await {
+        match client
+            .post(format!("{}/api/memory/remember", self.daemon_url))
+            .headers(daemon_auth_headers_from_env(None))
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => match resp.json::<serde_json::Value>().await {
                 Ok(data) => {
                     let id = data.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
@@ -141,7 +154,13 @@ impl Tool for KnowledgeExpandTool {
 
         let client = reqwest::Client::new();
         let body = json!({ "entity": entity });
-        match client.post(format!("{}/api/knowledge/expand", self.daemon_url)).json(&body).send().await {
+        match client
+            .post(format!("{}/api/knowledge/expand", self.daemon_url))
+            .headers(daemon_auth_headers_from_env(None))
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => match resp.text().await {
                 Ok(text) => ToolResult::success(&call.id, text),
                 Err(e) => ToolResult::error(&call.id, format!("Read error: {e}")),
@@ -193,7 +212,13 @@ impl Tool for SecretExecTool {
 
         let client = reqwest::Client::new();
         let body = json!({ "command": command, "secrets": secrets });
-        match client.post(format!("{}/api/secrets/exec", self.daemon_url)).json(&body).send().await {
+        match client
+            .post(format!("{}/api/secrets/exec", self.daemon_url))
+            .headers(daemon_auth_headers_from_env(None))
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => match resp.json::<serde_json::Value>().await {
                 Ok(data) => {
                     let stdout = data.get("stdout").and_then(|v| v.as_str()).unwrap_or("");

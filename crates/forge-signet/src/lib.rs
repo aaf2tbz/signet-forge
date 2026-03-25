@@ -7,7 +7,7 @@ pub mod secrets;
 pub mod skills;
 pub mod watcher;
 
-pub use client::SignetClient;
+pub use client::{daemon_auth_headers, daemon_auth_headers_from_env, SignetClient};
 pub use secrets::{DiscoveredProvider, KeySource};
 pub use skills::Skill;
 pub use watcher::{ConfigEvent, ConfigWatcher};

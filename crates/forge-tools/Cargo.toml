@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 forge-core = { workspace = true }
 forge-provider = { workspace = true }
+forge-signet = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

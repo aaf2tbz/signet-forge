@@ -1,6 +1,7 @@
 use crate::Tool;
 use async_trait::async_trait;
 use forge_core::{ToolCall, ToolDefinition, ToolPermission, ToolResult};
+use forge_signet::daemon_auth_headers_from_env;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, warn};
@@ -49,7 +50,13 @@ impl Tool for MarketplaceTool {
         let client = reqwest::Client::new();
         let body = json!({ "arguments": call.input });
 
-        match client.post(&url).json(&body).send().await {
+        match client
+            .post(&url)
+            .headers(daemon_auth_headers_from_env(None))
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 let status = resp.status();
                 match resp.text().await {
@@ -93,7 +100,12 @@ pub async fn fetch_marketplace_tools(daemon_url: &str) -> Vec<MarketplaceToolDef
     let url = format!("{}/api/marketplace/tools", daemon_url);
     let client = reqwest::Client::new();
 
-    let resp = match client.get(&url).send().await {
+    let resp = match client
+        .get(&url)
+        .headers(daemon_auth_headers_from_env(None))
+        .send()
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             debug!("Marketplace tools fetch failed: {e}");

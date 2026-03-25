@@ -187,6 +187,8 @@ forge --auth-only                        # Configure auth, then exit
 forge --provider claude-cli              # Use Claude Code CLI
 forge --provider ollama --model qwen3:4b # Local model
 forge --model claude-opus-4-6            # Specific model (infers provider)
+forge --signet-token <token>             # Signet daemon auth for team/hybrid mode
+forge --signet-actor my-agent            # Override x-signet-actor header
 forge -p "explain this error" < err.log  # Non-interactive, streams to stdout
 forge --resume                           # Continue last session
 forge --theme midnight                   # Set theme
@@ -204,6 +206,17 @@ forge --no-daemon                        # Standalone, no Signet
 Forge stores local auth values in your platform config dir:
 - macOS: `~/Library/Application Support/forge/credentials.json`
 - Linux: `~/.config/forge/credentials.json`
+
+### Signet daemon auth
+
+Forge now matches Signet's daemon auth contract:
+
+- Sends `Authorization: Bearer <token>` when `--signet-token` is set
+- Sends `x-signet-actor` and `x-signet-actor-type: agent` on daemon requests
+- Reads token/actor from env as well: `FORGE_SIGNET_TOKEN`, `SIGNET_AUTH_TOKEN`, `SIGNET_TOKEN`, `FORGE_SIGNET_ACTOR`, `SIGNET_ACTOR`
+
+This matters when Signet runs in authenticated `team` mode, or in `hybrid`
+mode behind a non-loopback/proxied setup.
 
 ---
 

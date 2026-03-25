@@ -36,6 +36,14 @@ struct Cli {
     #[arg(long, default_value = "http://localhost:3850")]
     daemon_url: String,
 
+    /// Bearer token for Signet daemon auth (team/hybrid modes)
+    #[arg(long)]
+    signet_token: Option<String>,
+
+    /// Actor name to send to the Signet daemon
+    #[arg(long)]
+    signet_actor: Option<String>,
+
     /// Run without connecting to Signet daemon
     #[arg(long)]
     no_daemon: bool,
@@ -113,6 +121,16 @@ async fn main() -> Result<()> {
         ensure_signet(&cli.daemon_url).await;
     }
 
+    if let Some(token) = cli.signet_token.as_deref().filter(|v| !v.trim().is_empty()) {
+        std::env::set_var("FORGE_SIGNET_TOKEN", token);
+    }
+    if let Some(actor) = cli.signet_actor.as_deref().filter(|v| !v.trim().is_empty()) {
+        std::env::set_var("FORGE_SIGNET_ACTOR", actor);
+    } else if let Some(agent_name) = cli.agent.as_deref().filter(|v| !v.trim().is_empty()) {
+        std::env::set_var("FORGE_SIGNET_ACTOR", agent_name.to_lowercase());
+    }
+    std::env::set_var("FORGE_SIGNET_ACTOR_TYPE", "agent");
+
     // Load Signet agent config
     let _agent_config = load_agent_config().unwrap_or_default();
 
@@ -122,6 +140,17 @@ async fn main() -> Result<()> {
         None
     } else {
         let mut client = SignetClient::new(&cli.daemon_url);
+        if let Some(token) = cli.signet_token.as_deref() {
+            client = client.with_token(token);
+        }
+        if let Some(actor) = cli.signet_actor.as_deref() {
+            client = client.with_actor(actor);
+        } else if let Some(agent_name) = cli.agent.as_deref() {
+            client = client.with_actor(agent_name.to_lowercase());
+        } else {
+            client = client.with_actor("forge");
+        }
+        client = client.with_actor_type("agent");
         if let Some(ref agent_name) = cli.agent {
             client = client.with_agent(&agent_name.to_lowercase());
             info!("Agent mode: {} (id: {})", agent_name, agent_name.to_lowercase());
