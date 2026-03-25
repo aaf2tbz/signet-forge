@@ -640,7 +640,7 @@ fn read_from_clipboard() -> Result<String> {
         if !output.status.success() {
             return Err(anyhow::anyhow!("pbpaste failed"));
         }
-        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     #[cfg(not(target_os = "macos"))]
