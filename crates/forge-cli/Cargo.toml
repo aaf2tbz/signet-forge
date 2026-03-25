@@ -12,7 +12,7 @@ forge-core = { workspace = true }
 forge-provider = { workspace = true }
 forge-agent = { workspace = true }
 forge-signet = { workspace = true }
-forge-tui = { workspace = true }
+forge-tui = { workspace = true, default-features = false }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tokio = { workspace = true }
@@ -24,3 +24,7 @@ forge-tools = { workspace = true }
 futures = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
+
+[features]
+default = ["voice"]
+voice = ["forge-tui/voice"]

@@ -80,7 +80,7 @@ forge-tools = { path = "crates/forge-tools" }
 forge-mcp = { path = "crates/forge-mcp" }
 forge-signet = { path = "crates/forge-signet" }
 forge-agent = { path = "crates/forge-agent" }
-forge-tui = { path = "crates/forge-tui" }
+forge-tui = { path = "crates/forge-tui", default-features = false }
 
 [profile.release]
 lto = true
