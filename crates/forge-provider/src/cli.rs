@@ -84,16 +84,21 @@ impl CliProvider {
         }
     }
 
-    /// Build a single prompt string from the message history
-    fn build_prompt(messages: &[Message], opts: &CompletionOpts) -> String {
-        let mut parts = Vec::new();
-
-        // System prompt
-        if let Some(system) = &opts.system_prompt {
-            parts.push(format!("<system>\n{system}\n</system>"));
+    /// Build a single prompt string from the message history.
+    /// For CLI providers, only the latest user message matters — the CLI
+    /// manages its own context, system prompt, and conversation state.
+    fn build_prompt(messages: &[Message], _opts: &CompletionOpts) -> String {
+        // Extract just the latest user message — CLI handles the rest
+        if let Some(last) = messages.iter().rev().find(|m| m.role == Role::User) {
+            for content in &last.content {
+                if let MessageContent::Text { text } = content {
+                    return text.clone();
+                }
+            }
         }
 
-        // Conversation history (skip the last user message, we'll add it separately)
+        // Fallback: build full prompt if no user message found
+        let mut parts = Vec::new();
         let history_msgs: Vec<&Message> = messages
             .iter()
             .filter(|m| m.role != Role::System)
