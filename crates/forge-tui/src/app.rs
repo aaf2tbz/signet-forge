@@ -2283,7 +2283,11 @@ impl App {
 
         if self.voice_recording {
             // Stop recording and do final transcription
+            tracing::info!("Voice toggle: stopping recording");
             self.stop_voice_recording();
+            // Belt-and-suspenders — force clear in case stop didn't fully work
+            self.voice_recording = false;
+            self.voice_recorder = None;
         } else {
             // Start recording — ensure model is available first
             if self.voice_model_path.is_none() {
