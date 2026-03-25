@@ -165,31 +165,50 @@ pub fn transcribe(
         return Ok(String::new());
     }
 
-    // Suppress whisper.cpp's verbose GGML/Metal init logs from flooding the TUI.
-    // Redirect stderr to /dev/null during model load, restore after.
+    // Suppress ALL whisper.cpp output (stdout + stderr) during the entire
+    // transcription. GGML/Metal init, state creation, and inference all dump
+    // verbose logs that flood the TUI.
     #[cfg(unix)]
-    let stderr_guard = {
+    let (stdout_guard, stderr_guard) = {
         use std::os::unix::io::AsRawFd;
-        let old = unsafe { libc::dup(2) };
+        let old_out = unsafe { libc::dup(1) };
+        let old_err = unsafe { libc::dup(2) };
         if let Ok(devnull) = std::fs::File::open("/dev/null") {
-            unsafe { libc::dup2(devnull.as_raw_fd(), 2); }
+            let fd = devnull.as_raw_fd();
+            unsafe {
+                libc::dup2(fd, 1);
+                libc::dup2(fd, 2);
+            }
         }
-        old
+        (old_out, old_err)
     };
 
-    let ctx = WhisperContext::new_with_params(
-        model_path.to_str().unwrap_or(""),
-        WhisperContextParameters::default(),
-    )
-    .map_err(|e| format!("Load model: {e}"))?;
+    let result = (|| -> Result<(WhisperContext, _), String> {
+        let ctx = WhisperContext::new_with_params(
+            model_path.to_str().unwrap_or(""),
+            WhisperContextParameters::default(),
+        )
+        .map_err(|e| format!("Load model: {e}"))?;
 
-    // Restore stderr
-    #[cfg(unix)]
-    unsafe { libc::dup2(stderr_guard, 2); libc::close(stderr_guard); }
+        let state = ctx
+            .create_state()
+            .map_err(|e| format!("Create state: {e}"))?;
 
-    let mut state = ctx
-        .create_state()
-        .map_err(|e| format!("Create state: {e}"))?;
+        Ok((ctx, state))
+    })();
+
+    let (_ctx, mut state) = match result {
+        Ok(v) => v,
+        Err(e) => {
+            // Restore before returning error
+            #[cfg(unix)]
+            unsafe {
+                libc::dup2(stdout_guard, 1); libc::close(stdout_guard);
+                libc::dup2(stderr_guard, 2); libc::close(stderr_guard);
+            }
+            return Err(e);
+        }
+    };
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en"));
@@ -205,6 +224,13 @@ pub fn transcribe(
     state
         .full(params, &audio)
         .map_err(|e| format!("Transcribe: {e}"))?;
+
+    // Restore stdout + stderr now that whisper is done
+    #[cfg(unix)]
+    unsafe {
+        libc::dup2(stdout_guard, 1); libc::close(stdout_guard);
+        libc::dup2(stderr_guard, 2); libc::close(stderr_guard);
+    }
 
     let mut text = String::new();
     let n = state
