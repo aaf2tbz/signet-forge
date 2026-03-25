@@ -147,6 +147,8 @@ pub struct App {
     memories_injected: usize,
     /// Total memories in database
     total_memories: usize,
+    /// Total secrets available in Signet
+    total_secrets: usize,
     /// Daemon health status
     daemon_healthy: bool,
     /// Is the agent currently processing?
@@ -368,11 +370,16 @@ impl App {
         let skills = forge_signet::skills::load_skills();
         debug!("Loaded {} skills", skills.len());
 
-        // Fetch total memory count from daemon
-        let total_memories = if let Some(client) = &signet_client {
-            client.memory_count().await
+        // Fetch total memory and secrets count from daemon
+        let (total_memories, total_secrets) = if let Some(client) = &signet_client {
+            let mem = client.memory_count().await;
+            let sec = client.get("/api/secrets").await
+                .ok()
+                .and_then(|v| v.get("secrets").and_then(|s| s.as_array()).map(|a| a.len()))
+                .unwrap_or(0);
+            (mem, sec)
         } else {
-            0
+            (0, 0)
         };
 
         let (voice_result_tx, voice_result_rx) = mpsc::channel::<VoiceResult>(16);
@@ -397,6 +404,7 @@ impl App {
             bypass,
             memories_injected,
             total_memories,
+            total_secrets,
             daemon_healthy,
             processing: false,
             processing_phase: ProcessingPhase::Idle,
@@ -750,6 +758,7 @@ impl App {
             context_window: self.context_window,
             memories_injected: self.memories_injected,
             total_memories: self.total_memories,
+            total_secrets: self.total_secrets,
             effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
             active_agent: self.active_agent.as_deref(),
