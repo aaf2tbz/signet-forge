@@ -633,7 +633,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "forge-agent"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "forge-cli"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "clap",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "forge-core"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "chrono",
  "reqwest",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "forge-mcp"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -707,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "forge-provider"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "forge-signet"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "forge-tools"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -765,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "forge-tui"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "arboard",
