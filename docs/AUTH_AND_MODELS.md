@@ -1,55 +1,118 @@
-# Auth and Model Discovery
+# Auth and Models
 
-Forge now treats auth and model availability as part of the Signet pipeline instead of as separate manual config.
+Forge treats auth and model availability as part of the Signet pipeline, not as a separate manual setup problem.
 
-## Sources of provider connectivity
+## Connectivity sources
 
-Forge discovers providers from:
+Forge determines whether a provider is usable from these sources:
 
 1. environment variables
 2. Forge local credentials
 3. Signet secrets
-4. authenticated CLI tools
-5. Ollama
+4. authenticated CLI login state
+5. local provider availability such as Ollama
 
-For API providers, Signet secret names like `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` are imported into Forge automatically when Forge connects to the daemon.
+## Forge local credentials
+
+Forge stores local credentials in the platform config directory.
+
+Typical paths:
+
+- macOS: `~/Library/Application Support/forge/credentials.json`
+- Linux: `~/.config/forge/credentials.json`
+
+These credentials are used for API providers and, where needed, for pasted CLI auth material.
 
 ## Signet secret sync
 
-On startup, Forge:
+When Forge connects to the Signet daemon, it can import supported provider API keys from Signet secrets into Forge local credentials.
 
-1. connects to the Signet daemon
-2. lists available Signet secrets
-3. imports matching provider API keys into Forge local credentials if Forge does not already have a local key
-4. requests a Signet model-registry refresh
+That means a key stored once in Signet can automatically make the provider available in Forge.
 
-This means a key stored once in Signet can make a provider available in Forge without a second manual setup step.
+The general flow is:
 
-## CLI provider detection
+1. Forge connects to Signet
+2. Forge checks available Signet secrets
+3. matching provider keys are imported if Forge does not already have a local value
+4. Forge requests a model-registry refresh
 
-Forge now only treats CLI providers as connected when they are actually authenticated:
+## CLI provider auth detection
 
-- `claude-cli`: checked through `claude auth status --json`
-- `codex-cli`: checked through `codex login status`
-- `gemini-cli`: detected from saved/env auth
+Forge does not treat a CLI provider as connected just because the binary exists.
 
-Installed-but-not-logged-in CLIs should no longer appear as fully connected providers.
+It treats supported CLI providers as connected when they are actually authenticated, including persisted login state that already exists on disk.
 
-## Model picker behavior
+### Supported CLI detection
 
-The model picker is filtered to connected providers.
+- `claude-cli`
+  - checked through Claude auth status
+- `codex-cli`
+  - checked through Codex login status
+  - can also trust persisted Codex auth state on disk
+- `gemini-cli`
+  - checked through persisted or configured auth state
 
-- disconnected providers are hidden
-- registry models from Signet are preferred when available
-- fallback model lists are only used for connected providers that do not yet have full registry coverage
+This is important because a provider should not show up in `/model` just because the executable is installed.
 
-Provider-family mapping:
+## Auth flow
 
-- `claude-code` registry entries are shown under `claude-cli`
-- `codex` registry entries are shown under `codex-cli`
+Forge’s auth flow supports both API-style auth and CLI-style auth.
 
-## Version auto-updates
+### API providers
 
-Forge does not need every model version hardcoded locally anymore.
+For API providers, Forge expects a real API key.
 
-When Signet’s registry learns about newer model versions, Forge can surface them automatically for connected providers. This is already strongest for providers where Signet has live discovery support, and it improves further as the Signet registry gains broader provider coverage.
+### CLI providers
+
+For CLI providers, Forge supports the native login flow and persisted login detection.
+
+Depending on the provider, Forge can also support token or auth-state import paths where that matches how the CLI really works.
+
+## Signet daemon auth
+
+Forge supports authenticated Signet daemon access.
+
+When configured, Forge sends:
+
+- `Authorization: Bearer <token>`
+- `x-signet-actor`
+- `x-signet-actor-type: agent`
+
+This matters when Signet is running in authenticated team or hybrid modes.
+
+## Model discovery
+
+Forge only wants to show models that are actually usable.
+
+That means the model picker is built from connected providers, not from a static master list of every possible provider.
+
+### Sources of model lists
+
+Forge can use:
+
+- Signet registry-backed models
+- curated CLI model coverage for supported CLI families
+- provider-specific fallback coverage where needed
+
+### Registry preference
+
+When Signet has registry coverage for a connected provider family, Forge prefers those registry models so newer versions can surface automatically.
+
+### CLI family mapping
+
+Forge maps registry families into the terminal-facing provider names where needed, for example:
+
+- `claude-code` registry entries shown under `claude-cli`
+- `codex` registry entries shown under `codex-cli`
+
+## Refresh behavior
+
+Model availability should update when provider connectivity changes.
+
+Important cases include:
+
+- opening the model picker after auth changes
+- connecting to Signet and importing secrets
+- detecting an already-authenticated CLI provider
+
+The intended result is simple: if a provider is connected, its models should appear without forcing unnecessary re-auth.
