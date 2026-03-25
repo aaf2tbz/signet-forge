@@ -8,6 +8,7 @@ use crate::views::dashboard_panel::DashboardPanel;
 use crate::views::model_picker::ModelPicker;
 use crate::views::session_browser::SessionBrowser;
 use crate::views::signet_commands::{self, CommandPicker};
+use crate::voice;
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
 use forge_agent::{
@@ -25,6 +26,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
     DefaultTerminal, Frame,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info};
@@ -204,6 +206,36 @@ pub struct App {
     active_agent: Option<String>,
     /// Live daemon log lines (ring buffer, max 100)
     daemon_logs: Vec<String>,
+    /// Voice input: microphone recorder (present while recording)
+    voice_recorder: Option<voice::Recorder>,
+    /// Whether voice recording is active
+    voice_recording: bool,
+    /// Path to the downloaded whisper model
+    voice_model_path: Option<PathBuf>,
+    /// Interim transcription text (preview while recording)
+    voice_interim_text: String,
+    /// Whether voice model is currently being downloaded
+    voice_downloading: bool,
+    /// Last time an interim transcription was triggered
+    voice_last_interim: std::time::Instant,
+    /// Handle for background interim transcription task
+    voice_interim_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Channel to receive interim/final transcription results
+    voice_result_rx: Option<mpsc::Receiver<VoiceResult>>,
+    /// Sender for voice transcription results (cloned into tasks)
+    voice_result_tx: mpsc::Sender<VoiceResult>,
+}
+
+/// Result from a voice transcription task
+enum VoiceResult {
+    /// Interim preview text (shown while recording)
+    Interim(String),
+    /// Final transcription (committed to input)
+    Final(String),
+    /// Model downloaded successfully
+    ModelReady(PathBuf),
+    /// Error during voice operation
+    Error(String),
 }
 
 impl App {
@@ -343,6 +375,8 @@ impl App {
             0
         };
 
+        let (voice_result_tx, voice_result_rx) = mpsc::channel::<VoiceResult>(16);
+
         Self {
             input: String::new(),
             cursor: 0,
@@ -394,6 +428,15 @@ impl App {
             speculative_handle: None,
             last_keystroke: std::time::Instant::now(),
             recall_cache,
+            voice_recorder: None,
+            voice_recording: false,
+            voice_model_path: None,
+            voice_interim_text: String::new(),
+            voice_downloading: false,
+            voice_last_interim: std::time::Instant::now(),
+            voice_interim_handle: None,
+            voice_result_rx: Some(voice_result_rx),
+            voice_result_tx,
         }
     }
 
@@ -545,6 +588,55 @@ impl App {
                 }
             }
 
+            // Drain voice transcription results — collect first to avoid borrow conflict
+            {
+                let mut voice_events: Vec<VoiceResult> = Vec::new();
+                if let Some(rx) = &mut self.voice_result_rx {
+                    while let Ok(result) = rx.try_recv() {
+                        voice_events.push(result);
+                    }
+                }
+                for result in voice_events {
+                    match result {
+                        VoiceResult::Interim(text) => {
+                            self.voice_interim_text = text;
+                        }
+                        VoiceResult::Final(text) => {
+                            if !text.is_empty() {
+                                let byte_pos = self.cursor_byte_pos();
+                                self.input.insert_str(byte_pos, &text);
+                                self.cursor += text.chars().count();
+                            }
+                            self.voice_interim_text.clear();
+                        }
+                        VoiceResult::ModelReady(path) => {
+                            self.voice_model_path = Some(path);
+                            self.voice_downloading = false;
+                            self.entries.push(ChatEntry::Status(
+                                "Voice model ready.".to_string(),
+                            ));
+                            self.start_voice_recording();
+                        }
+                        VoiceResult::Error(msg) => {
+                            self.voice_downloading = false;
+                            self.voice_recording = false;
+                            self.voice_recorder = None;
+                            self.voice_interim_text.clear();
+                            self.entries
+                                .push(ChatEntry::Error(format!("Voice: {msg}")));
+                        }
+                    }
+                }
+            }
+
+            // Trigger interim transcription every ~2 seconds while recording
+            if self.voice_recording
+                && self.voice_last_interim.elapsed() > std::time::Duration::from_secs(2)
+            {
+                self.voice_last_interim = std::time::Instant::now();
+                self.trigger_interim_transcription();
+            }
+
             // Speculative pre-recall — fire after 500ms of no typing
             if !self.processing
                 && !self.input.is_empty()
@@ -670,8 +762,13 @@ impl App {
         };
         status.render(chunks[0], frame.buffer_mut());
 
-        // Chat area — render animated activity line when processing
-        let activity_line = if self.processing && self.processing_phase != ProcessingPhase::Streaming {
+        // Chat area — render animated activity line when processing or recording
+        let activity_line = if self.voice_downloading {
+            Some("  ◈ Downloading voice model (142MB)...".to_string())
+        } else if self.voice_recording {
+            let dots = ".".repeat((self.tick / 4) % 4);
+            Some(format!("  ● Recording{dots} (Ctrl+R to stop)"))
+        } else if self.processing && self.processing_phase != ProcessingPhase::Streaming {
             let rendered = self.processing_phase.render(self.tick);
             if rendered.is_empty() { None } else { Some(rendered) }
         } else {
@@ -695,12 +792,30 @@ impl App {
             .borders(Borders::TOP)
             .border_style(Style::default().fg(self.theme.border));
 
-        let input_text = if self.input.is_empty() {
+        let input_text = if self.input.is_empty() && self.voice_interim_text.is_empty() {
+            let placeholder = if self.voice_recording {
+                " Listening..."
+            } else {
+                " Type a message..."
+            };
             Paragraph::new(Span::styled(
-                " Type a message...",
+                placeholder,
                 Style::default().fg(self.theme.muted),
             ))
             .wrap(Wrap { trim: false })
+        } else if !self.voice_interim_text.is_empty() {
+            // Show committed input + grayed interim preview
+            let mut spans = vec![];
+            if !self.input.is_empty() {
+                spans.push(Span::styled(format!(" > {}", &self.input), input_style));
+            } else {
+                spans.push(Span::styled(" > ", input_style));
+            }
+            spans.push(Span::styled(
+                &self.voice_interim_text,
+                Style::default().fg(self.theme.muted),
+            ));
+            Paragraph::new(Line::from(spans)).wrap(Wrap { trim: false })
         } else {
             Paragraph::new(Span::styled(format!(" > {}", &self.input), input_style))
                 .wrap(Wrap { trim: false })
@@ -910,6 +1025,7 @@ impl App {
                 "dashboard_nav" => Action::DashboardNav,
                 "keybinds" => Action::Keybinds,
                 "session_browser" => Action::SessionBrowser,
+                "voice_input" => Action::VoiceInput,
                 "clear_screen" => Action::ClearScreen,
                 "scroll_up" => Action::ScrollUp,
                 "scroll_down" => Action::ScrollDown,
@@ -1047,6 +1163,9 @@ impl App {
             }
             Action::Dashboard if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
+            }
+            Action::VoiceInput => {
+                self.handle_voice_toggle().await;
             }
             _ => {}
         }
@@ -2137,6 +2256,151 @@ impl App {
                 false
             }
         }
+    }
+
+    // ── Voice input ───────────────────────────────────────────────────
+
+    /// Handle Ctrl+R: toggle voice recording on/off
+    async fn handle_voice_toggle(&mut self) {
+        if self.voice_downloading {
+            // Model download in progress — ignore
+            return;
+        }
+
+        if self.voice_recording {
+            // Stop recording and do final transcription
+            self.stop_voice_recording();
+        } else {
+            // Start recording — ensure model is available first
+            if self.voice_model_path.is_none() {
+                // Check if model file already exists on disk
+                let model_path = dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("forge")
+                    .join("models")
+                    .join("ggml-base.en.bin");
+
+                if model_path.exists() {
+                    self.voice_model_path = Some(model_path);
+                } else {
+                    // Need to download — kick off background task
+                    self.voice_downloading = true;
+                    self.entries.push(ChatEntry::Status(
+                        "Downloading voice model (142MB)...".to_string(),
+                    ));
+                    let tx = self.voice_result_tx.clone();
+                    tokio::spawn(async move {
+                        match voice::ensure_model().await {
+                            Ok(path) => {
+                                let _ = tx.send(VoiceResult::ModelReady(path)).await;
+                            }
+                            Err(e) => {
+                                let _ = tx.send(VoiceResult::Error(e)).await;
+                            }
+                        }
+                    });
+                    return;
+                }
+            }
+
+            self.start_voice_recording();
+        }
+    }
+
+    /// Start microphone recording
+    fn start_voice_recording(&mut self) {
+        match voice::Recorder::new() {
+            Ok(mut recorder) => match recorder.start() {
+                Ok(()) => {
+                    self.voice_recorder = Some(recorder);
+                    self.voice_recording = true;
+                    self.voice_interim_text.clear();
+                    self.voice_last_interim = std::time::Instant::now();
+                }
+                Err(e) => {
+                    self.entries
+                        .push(ChatEntry::Error(format!("Microphone: {e}")));
+                }
+            },
+            Err(e) => {
+                self.entries
+                    .push(ChatEntry::Error(format!("Audio device: {e}")));
+            }
+        }
+    }
+
+    /// Stop recording and trigger final transcription
+    fn stop_voice_recording(&mut self) {
+        self.voice_recording = false;
+
+        // Abort any in-flight interim transcription
+        if let Some(handle) = self.voice_interim_handle.take() {
+            handle.abort();
+        }
+
+        if let Some(mut recorder) = self.voice_recorder.take() {
+            let samples = recorder.stop();
+            let sample_rate = recorder.sample_rate();
+            let channels = recorder.channels();
+
+            if samples.is_empty() {
+                self.voice_interim_text.clear();
+                return;
+            }
+
+            if let Some(model_path) = self.voice_model_path.clone() {
+                let tx = self.voice_result_tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    match voice::transcribe(&model_path, &samples, sample_rate, channels) {
+                        Ok(text) => {
+                            let _ = tx.blocking_send(VoiceResult::Final(text));
+                        }
+                        Err(e) => {
+                            let _ = tx.blocking_send(VoiceResult::Error(e));
+                        }
+                    }
+                });
+            }
+        } else {
+            self.voice_interim_text.clear();
+        }
+    }
+
+    /// Fire an interim transcription on a blocking thread
+    fn trigger_interim_transcription(&mut self) {
+        // Don't stack up multiple interim tasks
+        if let Some(handle) = &self.voice_interim_handle {
+            if !handle.is_finished() {
+                return;
+            }
+        }
+
+        let Some(recorder) = &self.voice_recorder else {
+            return;
+        };
+        let Some(model_path) = self.voice_model_path.clone() else {
+            return;
+        };
+
+        let samples = recorder.current_samples();
+        if samples.is_empty() {
+            return;
+        }
+
+        let sample_rate = recorder.sample_rate();
+        let channels = recorder.channels();
+        let tx = self.voice_result_tx.clone();
+
+        self.voice_interim_handle = Some(tokio::task::spawn_blocking(move || {
+            match voice::transcribe(&model_path, &samples, sample_rate, channels) {
+                Ok(text) => {
+                    let _ = tx.blocking_send(VoiceResult::Interim(text));
+                }
+                Err(_) => {
+                    // Silently ignore interim errors
+                }
+            }
+        }));
     }
 }
 

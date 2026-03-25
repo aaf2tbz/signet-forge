@@ -21,6 +21,7 @@ pub const KEYBIND_ACTIONS: &[(&str, &str, &str)] = &[
     ("paste", "Paste", "Ctrl+V"),
     ("keybinds", "Keybind Editor", "Ctrl+B"),
     ("session_browser", "Session Browser", "Ctrl+H"),
+    ("voice_input", "Voice Input", "Ctrl+R"),
 ];
 
 /// Stored keybinding configuration

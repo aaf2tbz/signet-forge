@@ -116,6 +116,7 @@ impl<'a> Widget for StatusBar<'a> {
                 ("quit", "Quit"),
                 ("keybinds", "Keybinds"),
                 ("session_browser", "Sessions"),
+                ("voice_input", "Voice"),
             ];
 
             // Only show hints that fit within terminal width

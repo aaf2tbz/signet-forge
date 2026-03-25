@@ -5,6 +5,7 @@ pub mod mcp_config;
 pub mod settings;
 pub mod theme;
 pub mod views;
+pub mod voice;
 pub mod widgets;
 
 pub use app::App;

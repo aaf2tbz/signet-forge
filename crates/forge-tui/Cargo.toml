@@ -25,3 +25,6 @@ png = { workspace = true }
 unicode-width = "0.2"
 reqwest-eventsource.workspace = true
 forge-mcp = { workspace = true }
+reqwest = { workspace = true }
+whisper-rs = { version = "0.14", features = ["metal"] }
+cpal = "0.15"

@@ -51,6 +51,8 @@ pub enum Action {
     SessionBrowser,
     /// Open dashboard panel
     DashboardPanel,
+    /// Toggle voice input recording
+    VoiceInput,
     /// No action
     None,
 }
@@ -89,6 +91,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => Action::Dashboard,
         (KeyModifiers::CONTROL, KeyCode::Char('b')) => Action::Keybinds,
         (KeyModifiers::CONTROL, KeyCode::Char('h')) => Action::SessionBrowser,
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => Action::VoiceInput,
 
         // Dashboard panel
         (KeyModifiers::NONE, KeyCode::F(2)) => Action::DashboardPanel,
