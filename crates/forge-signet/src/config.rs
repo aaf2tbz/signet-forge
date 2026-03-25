@@ -186,6 +186,25 @@ pub fn load_identity_file(name: &str) -> Option<String> {
     }
 }
 
+/// Extract the agent name from IDENTITY.md (looks for **name:** or name: field)
+pub fn agent_name() -> String {
+    load_identity_file("IDENTITY.md")
+        .and_then(|content| {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                // Match "**name:** Boogy" or "name: Boogy"
+                if let Some(rest) = trimmed.strip_prefix("**name:**") {
+                    return Some(rest.trim().to_string());
+                }
+                if let Some(rest) = trimmed.strip_prefix("name:") {
+                    return Some(rest.trim().to_string());
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| "Assistant".to_string())
+}
+
 /// Build the system prompt from Signet identity files
 pub fn build_identity_prompt() -> String {
     let mut parts = Vec::new();

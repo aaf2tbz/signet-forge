@@ -42,6 +42,8 @@ pub struct ChatView<'a> {
     pub scroll_offset: u16,
     /// Animated status line (rendered below streaming text when processing)
     pub activity_line: Option<String>,
+    /// Agent display name from IDENTITY.md
+    pub agent_name: &'a str,
     /// Active color theme
     pub theme: &'a Theme,
 }
@@ -100,6 +102,10 @@ impl<'a> Widget for ChatView<'a> {
                 }
                 ChatEntry::AssistantText(text) => {
                     lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        format!("  [{}]", self.agent_name),
+                        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                    )));
                     let md_lines = render_markdown(text, t);
                     for md_line in md_lines {
                         let mut indented_spans = vec![Span::raw("  ")];
@@ -192,6 +198,10 @@ impl<'a> Widget for ChatView<'a> {
         // Streaming text (currently being generated)
         if !self.streaming_text.is_empty() {
             lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  [{}]", self.agent_name),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            )));
             let md_lines = render_markdown(self.streaming_text, t);
             for md_line in md_lines {
                 let mut indented_spans = vec![Span::raw("  ")];

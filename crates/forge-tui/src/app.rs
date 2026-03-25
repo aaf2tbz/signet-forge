@@ -198,6 +198,8 @@ pub struct App {
     recall_cache: forge_signet::recall_cache::RecallCache,
     /// Pipeline summary (extraction + embedding models)
     pipeline_info: String,
+    /// Agent display name from IDENTITY.md
+    agent_name: String,
 }
 
 impl App {
@@ -380,6 +382,7 @@ impl App {
             config_rx,
             session_store,
             pipeline_info,
+            agent_name: forge_signet::config::agent_name(),
             speculative_query: String::new(),
             speculative_handle: None,
             last_keystroke: std::time::Instant::now(),
@@ -641,6 +644,7 @@ impl App {
             streaming_text: &self.streaming_text,
             scroll_offset: self.scroll_offset,
             activity_line,
+            agent_name: &self.agent_name,
             theme: &self.theme,
         };
         chat.render(chunks[1], frame.buffer_mut());
