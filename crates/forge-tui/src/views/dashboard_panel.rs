@@ -57,9 +57,11 @@ pub struct DashboardPanel {
     pub data: DashboardData,
     pub tab: usize,
     pub loading: bool,
+    /// Live daemon logs (reference to app's ring buffer)
+    pub logs: Vec<String>,
 }
 
-const TABS: &[&str] = &["Memory", "Pipeline", "Embeddings", "Health"];
+const TABS: &[&str] = &["Memory", "Pipeline", "Embeddings", "Health", "Logs"];
 
 impl Default for DashboardPanel {
     fn default() -> Self {
@@ -73,6 +75,7 @@ impl DashboardPanel {
             data: DashboardData::default(),
             tab: 0,
             loading: true,
+            logs: Vec::new(),
         }
     }
 
@@ -141,6 +144,7 @@ impl DashboardPanel {
                 1 => self.render_pipeline(&mut lines, theme),
                 2 => self.render_embedding(&mut lines, theme),
                 3 => self.render_diagnostics(&mut lines, theme),
+                4 => self.render_logs(&mut lines, theme),
                 _ => {}
             }
         }
@@ -316,6 +320,38 @@ impl DashboardPanel {
             Span::styled("  Score:  ", label),
             Span::styled(format!("{:.0}%", d.score * 100.0), Style::default().fg(status_color)),
         ]));
+    }
+
+    fn render_logs(&self, lines: &mut Vec<Line>, theme: &Theme) {
+        if self.logs.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  No log entries (SSE stream connecting...)",
+                Style::default().fg(theme.muted),
+            )));
+        } else {
+            // Show last entries that fit
+            let max = 14;
+            let start = self.logs.len().saturating_sub(max);
+            for log in &self.logs[start..] {
+                // Try to parse JSON for pretty display
+                let display = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(log) {
+                    let level = parsed.get("level").and_then(|v| v.as_str()).unwrap_or("");
+                    let cat = parsed.get("category").and_then(|v| v.as_str()).unwrap_or("");
+                    let msg = parsed.get("message").and_then(|v| v.as_str()).unwrap_or(log);
+                    format!("  [{level}] [{cat}] {msg}")
+                } else {
+                    format!("  {log}")
+                };
+                let color = if display.contains("[warn]") {
+                    theme.warning
+                } else if display.contains("[error]") {
+                    theme.error
+                } else {
+                    theme.fg
+                };
+                lines.push(Line::from(Span::styled(display, Style::default().fg(color))));
+            }
+        }
     }
 }
 

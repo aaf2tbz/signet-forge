@@ -200,6 +200,8 @@ pub struct App {
     pipeline_info: String,
     /// Agent display name from IDENTITY.md
     agent_name: String,
+    /// Live daemon log lines (ring buffer, max 100)
+    daemon_logs: Vec<String>,
 }
 
 impl App {
@@ -383,6 +385,7 @@ impl App {
             session_store,
             pipeline_info,
             agent_name: forge_signet::config::agent_name(),
+            daemon_logs: Vec::new(),
             speculative_query: String::new(),
             speculative_handle: None,
             last_keystroke: std::time::Instant::now(),
@@ -428,7 +431,38 @@ impl App {
             }
         }
 
+        // Start SSE log stream from daemon (background task)
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel::<String>(64);
+        if let Some(client) = &self.signet_client {
+            let url = format!("{}/api/logs/stream", client.base_url());
+            tokio::spawn(async move {
+                use futures::StreamExt;
+                use reqwest_eventsource::{Event as SseEvent, EventSource};
+                let mut es = EventSource::get(&url);
+                while let Some(event) = es.next().await {
+                    match event {
+                        Ok(SseEvent::Message(msg)) => {
+                            let _ = log_tx.try_send(msg.data);
+                        }
+                        Err(_) => {
+                            // Connection lost — wait and retry
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
+
         loop {
+            // Drain SSE log messages
+            while let Ok(log) = log_rx.try_recv() {
+                self.daemon_logs.push(log);
+                if self.daemon_logs.len() > 100 {
+                    self.daemon_logs.remove(0);
+                }
+            }
+
             // Increment animation tick
             self.tick = self.tick.wrapping_add(1);
 
@@ -1015,6 +1049,7 @@ impl App {
 
     async fn open_dashboard_panel(&mut self) {
         let mut panel = DashboardPanel::new();
+        panel.logs = self.daemon_logs.clone();
         if let Some(client) = &self.signet_client {
             let (mem, pipe, emb, diag) = tokio::join!(
                 client.get("/api/memories?limit=0"),

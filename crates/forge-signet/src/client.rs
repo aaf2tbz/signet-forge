@@ -83,31 +83,48 @@ impl SignetClient {
             .map_err(|e| ForgeError::daemon(format!("Invalid status response: {e}")))
     }
 
-    /// Generic GET request to daemon API
+    /// Generic GET request with retry (1 retry on connection error)
     pub async fn get(&self, path: &str) -> Result<serde_json::Value, ForgeError> {
-        let resp = self
-            .client
-            .get(format!("{}{}", self.base_url, path))
-            .send()
-            .await?;
+        let url = format!("{}{}", self.base_url, path);
+        let resp = match self.client.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) if e.is_connect() || e.is_timeout() => {
+                // One retry after a short delay
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                self.client
+                    .get(&url)
+                    .send()
+                    .await
+                    .map_err(|e| ForgeError::daemon(format!("GET {path} retry failed: {e}")))?
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         resp.json()
             .await
             .map_err(|e| ForgeError::daemon(format!("GET {path} parse error: {e}")))
     }
 
-    /// Generic POST request to daemon API
+    /// Generic POST request with retry (1 retry on connection error)
     pub async fn post(
         &self,
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ForgeError> {
-        let resp = self
-            .client
-            .post(format!("{}{}", self.base_url, path))
-            .json(body)
-            .send()
-            .await?;
+        let url = format!("{}{}", self.base_url, path);
+        let resp = match self.client.post(&url).json(body).send().await {
+            Ok(r) => r,
+            Err(e) if e.is_connect() || e.is_timeout() => {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                self.client
+                    .post(&url)
+                    .json(body)
+                    .send()
+                    .await
+                    .map_err(|e| ForgeError::daemon(format!("POST {path} retry failed: {e}")))?
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         resp.json()
             .await

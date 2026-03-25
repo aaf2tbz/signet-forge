@@ -779,6 +779,7 @@ dependencies = [
  "png 0.17.16",
  "pulldown-cmark",
  "ratatui",
+ "reqwest-eventsource",
  "serde",
  "serde_json",
  "syntect",

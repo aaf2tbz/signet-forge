@@ -1,9 +1,60 @@
 use crate::theme::Theme;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::{
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use syntect::easy::HighlightLines;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
+use std::sync::LazyLock;
+
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+/// Highlight code using syntect. Falls back to plain theme.code color if lang unknown.
+fn highlight_code(code: &str, lang: &str, theme: &Theme) -> Vec<Vec<Span<'static>>> {
+    let syntax = SYNTAX_SET
+        .find_syntax_by_token(lang)
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+
+    // Use a dark theme for dark terminals, light for light
+    let theme_name = if matches!(theme.name, "signet-light") {
+        "InspiredGitHub"
+    } else {
+        "base16-ocean.dark"
+    };
+    let syn_theme = THEME_SET
+        .themes
+        .get(theme_name)
+        .unwrap_or_else(|| &THEME_SET.themes["base16-ocean.dark"]);
+
+    let mut h = HighlightLines::new(syntax, syn_theme);
+    let mut result = Vec::new();
+
+    for line in code.lines() {
+        match h.highlight_line(line, &SYNTAX_SET) {
+            Ok(ranges) => {
+                let spans: Vec<Span<'static>> = ranges
+                    .into_iter()
+                    .map(|(style, text)| {
+                        let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+                        Span::styled(text.to_string(), Style::default().fg(fg))
+                    })
+                    .collect();
+                result.push(spans);
+            }
+            Err(_) => {
+                // Fallback: plain code color
+                result.push(vec![Span::styled(
+                    line.to_string(),
+                    Style::default().fg(theme.code),
+                )]);
+            }
+        }
+    }
+    result
+}
 
 /// Convert markdown text to styled ratatui Lines, using theme colors
 pub fn render_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
@@ -121,14 +172,12 @@ pub fn render_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                         format!("  ┌─{lang_display}─"),
                         Style::default().fg(theme.border),
                     )));
-                    for code_line in code_content.lines() {
-                        lines.push(Line::from(vec![
-                            Span::styled("  │ ", Style::default().fg(theme.border)),
-                            Span::styled(
-                                code_line.to_string(),
-                                Style::default().fg(theme.code),
-                            ),
-                        ]));
+                    // Syntax-highlighted code block
+                    let highlighted = highlight_code(&code_content, &code_lang, theme);
+                    for spans in highlighted {
+                        let mut row = vec![Span::styled("  │ ", Style::default().fg(theme.border))];
+                        row.extend(spans);
+                        lines.push(Line::from(row));
                     }
                     lines.push(Line::from(Span::styled(
                         "  └───",

@@ -88,10 +88,10 @@ Six phases from scaffold to production. Phases 1-5 complete. Phase 6 tracks futu
 Stretch goals and next-generation features.
 
 ### Near-term
-- [ ] **Error recovery** — daemon reconnect, API timeout retry, graceful degradation
-- [ ] **Syntax highlighting** — syntect-based code block coloring per language
+- [x] **Error recovery** — daemon GET/POST retry on connection/timeout errors (1 retry, 500ms delay)
+- [x] **Syntax highlighting** — syntect-based code block coloring (language-aware, dark/light theme)
+- [x] **SSE event stream** — background log stream from `/api/logs/stream`, Logs tab in dashboard panel
 - [ ] **Interactive CLI prompts** — detect/respond to CLI approval prompts from TUI
-- [ ] **SSE event stream** — real-time dashboard updates from daemon event bus
 - [ ] **Session import** — parse Claude Code `.claude/sessions/` for migration
 
 ### Medium-term
