@@ -7,6 +7,24 @@ use ratatui::{
     Frame,
 };
 
+/// Read Codex's configured model from ~/.codex/config.toml
+fn codex_configured_model() -> Option<String> {
+    let path = dirs::home_dir()?.join(".codex").join("config.toml");
+    let content = std::fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("model") && !trimmed.starts_with("model_") && trimmed.contains('=') {
+            if let Some(val) = trimmed.split('=').nth(1) {
+                let m = val.trim().trim_matches('"').trim_matches('\'').trim();
+                if !m.is_empty() {
+                    return Some(m.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// A model entry in the picker
 #[derive(Debug, Clone)]
 pub struct ModelEntry {
@@ -115,10 +133,27 @@ impl ModelPicker {
                     ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
                     ("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200_000),
                 ],
-                forge_provider::cli::CliKind::Codex => vec![
-                    ("o4-mini", "o4-mini", 200_000),
-                    ("gpt-4o", "GPT-4o", 128_000),
-                ],
+                forge_provider::cli::CliKind::Codex => {
+                    let v: Vec<(&str, &str, usize)> = vec![
+                        ("o4-mini", "o4-mini", 200_000),
+                        ("gpt-4o", "GPT-4o", 128_000),
+                    ];
+                    // Insert configured model at top if different
+                    if let Some(ref configured) = codex_configured_model() {
+                        if !v.iter().any(|(m, _, _)| *m == configured.as_str()) {
+                            // Can't push &str from owned String into static tuple,
+                            // so push a ModelEntry directly
+                            models.push(ModelEntry {
+                                provider: "codex-cli".into(),
+                                model: configured.clone(),
+                                display_name: format!("{configured} (configured) (CLI)"),
+                                context_window: 200_000,
+                                cli_path: Some(path.clone()),
+                            });
+                        }
+                    }
+                    v
+                },
                 forge_provider::cli::CliKind::Gemini => vec![
                     ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
                     ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000),
