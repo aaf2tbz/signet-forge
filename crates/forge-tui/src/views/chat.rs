@@ -219,22 +219,31 @@ impl<'a> Widget for ChatView<'a> {
         lines.push(Line::from(""));
         lines.push(Line::from(""));
 
-        // Estimate total wrapped lines for scroll calculation.
-        // Word-wrap (Wrap { trim: false }) can produce more lines than char-level
-        // div_ceil because it breaks at word boundaries. Add +1 per wrapped line
-        // to account for this, so we always show at least the last content.
+        // Measure actual wrapped height by rendering to a hidden buffer.
+        // This gives the exact line count ratatui produces — no estimation.
+        // Cap at 2000 rows to avoid excessive memory per frame.
         use unicode_width::UnicodeWidthStr;
-        let width = area.width as usize;
-        let total: u16 = if width == 0 {
-            lines.len() as u16
-        } else {
-            lines.iter().map(|line| {
-                let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
-                let raw = w.div_ceil(width) as u16;
-                // If line wraps at all, add 1 for word-boundary overshoot
-                if raw > 1 { raw + 1 } else { 1 }
-            }).sum()
-        };
+        let est: u16 = lines.iter().map(|line| {
+            let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
+            let width = area.width as usize;
+            if width == 0 { 1u16 } else { 1u16.max((w / width + 2) as u16) }
+        }).sum();
+        let max_h = est.min(2000).max(area.height);
+        let measure = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
+        let tall = Rect::new(0, 0, area.width, max_h);
+        let mut hidden = Buffer::empty(tall);
+        measure.render(tall, &mut hidden);
+        // Find the last non-empty row
+        let total = (0..max_h)
+            .rev()
+            .find(|&row| {
+                (0..area.width.min(5)).any(|col| {
+                    let cell = &hidden[(col, row)];
+                    cell.symbol() != " "
+                })
+            })
+            .map(|row| row + 1)
+            .unwrap_or(0);
 
         let scroll = if self.scroll_offset == 0 {
             total.saturating_sub(area.height)
