@@ -27,93 +27,101 @@ pub struct StatusBar<'a> {
     pub success: Color,
     pub error: Color,
     pub warning: Color,
+    pub spinner: Color,
 }
 
 impl<'a> Widget for StatusBar<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // ─── Line 1: Identity + Model ───────────────────────
-        // ◆ Forge · claude-opus-4-6 (claude-cli)                    ● 19/1672 memories
-        let health = if self.daemon_healthy {
-            Span::styled("●", Style::default().fg(self.success))
-        } else {
-            Span::styled("●", Style::default().fg(self.error))
-        };
+        let sep = Style::default().fg(self.muted);
 
-        let name = if self.agent_name != "Assistant" {
-            self.agent_name
-        } else {
-            "Forge"
-        };
-
-        let mut left = vec![
-            Span::styled(" ◆ ", Style::default().fg(self.accent)),
-            Span::styled(
-                name,
-                Style::default().fg(self.accent).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" · ", Style::default().fg(self.muted)),
-            Span::styled(
-                format!("{} ({})", self.model, self.provider),
-                Style::default().fg(self.status_fg),
-            ),
-        ];
-
-        // Effort indicator (only if non-default)
-        if self.effort != "medium" {
-            left.push(Span::styled(" · ", Style::default().fg(self.muted)));
-            left.push(Span::styled(
-                self.effort,
-                Style::default().fg(if self.effort == "high" {
-                    self.warning
-                } else {
-                    self.muted
-                }),
-            ));
-        }
-
-        // Agent indicator
-        if let Some(agent) = self.active_agent {
-            left.push(Span::styled(" · ", Style::default().fg(self.muted)));
-            left.push(Span::styled(
-                format!("@{agent}"),
-                Style::default().fg(self.accent),
-            ));
-        }
-
-        // Right side: health + memories
-        let token_total = self.input_tokens + self.output_tokens;
-        let tokens = format_tokens(token_total);
-        let ctx = format_tokens(self.context_window);
-        let mem_text = if self.total_memories > 0 {
-            format!("{}/{} mem", self.memories_injected, self.total_memories)
-        } else {
-            format!("{} mem", self.memories_injected)
-        };
-        let right_text = format!("{tokens}/{ctx}  {mem_text} ");
-        let right_width = right_text.len() + 3; // health dot + spaces
-
-        // Fill the line
+        // ─── Line 1: The forge bar ──────────────────────────
+        //  ◆ Boogy                        0/200K │ 19/1672 │ ●
         if area.height >= 1 {
-            buf.set_line(area.x, area.y, &Line::from(left), area.width);
-            // Right-align health + memory info
-            if area.width as usize > right_width {
-                let rx = area.x + area.width - right_width as u16;
-                let right_line = Line::from(vec![
-                    Span::styled(&right_text, Style::default().fg(self.muted)),
-                    health,
-                    Span::styled(" ", Style::default()),
-                ]);
-                buf.set_line(rx, area.y, &right_line, right_width as u16);
+            let name = if self.agent_name != "Assistant" {
+                self.agent_name
+            } else {
+                "Forge"
+            };
+
+            // Left: identity
+            let mut left = vec![
+                Span::styled(" ◆ ", Style::default().fg(self.spinner)),
+                Span::styled(
+                    name,
+                    Style::default().fg(self.accent).add_modifier(Modifier::BOLD),
+                ),
+            ];
+
+            // Model + provider (dimmer)
+            left.push(Span::styled("  ", sep));
+            left.push(Span::styled(
+                self.model,
+                Style::default().fg(self.status_fg),
+            ));
+            left.push(Span::styled(
+                format!(" ({})", self.provider),
+                Style::default().fg(self.muted),
+            ));
+
+            // Effort badge
+            if self.effort != "medium" {
+                left.push(Span::styled("  ", sep));
+                left.push(Span::styled(
+                    format!("◈ {}", self.effort),
+                    Style::default().fg(if self.effort == "high" {
+                        self.warning
+                    } else {
+                        self.muted
+                    }),
+                ));
             }
+
+            // Agent tag
+            if let Some(agent) = self.active_agent {
+                left.push(Span::styled("  ", sep));
+                left.push(Span::styled(
+                    format!("@{agent}"),
+                    Style::default().fg(self.accent),
+                ));
+            }
+
+            buf.set_line(area.x, area.y, &Line::from(left), area.width);
+
+            // Right: gauges — tokens │ memories │ health
+            let health = if self.daemon_healthy { "●" } else { "○" };
+            let health_color = if self.daemon_healthy { self.success } else { self.error };
+
+            let tokens = format_tokens(self.input_tokens + self.output_tokens);
+            let ctx = format_tokens(self.context_window);
+            let mem = if self.total_memories > 0 {
+                format!("{}/{}", self.memories_injected, self.total_memories)
+            } else {
+                format!("{}", self.memories_injected)
+            };
+
+            let right = vec![
+                Span::styled(format!("{tokens}/{ctx}"), Style::default().fg(self.muted)),
+                Span::styled(" │ ", sep),
+                Span::styled(format!("{mem} mem"), Style::default().fg(self.status_fg)),
+                Span::styled(" │ ", sep),
+                Span::styled(health, Style::default().fg(health_color)),
+                Span::styled(" ", Style::default()),
+            ];
+
+            let right_width: usize = right.iter().map(|s| s.content.len()).sum();
+            if (area.width as usize) > right_width {
+                let rx = area.x + area.width - right_width as u16;
+                buf.set_line(rx, area.y, &Line::from(right), right_width as u16);
+            }
+
             for x in area.x..area.x + area.width {
                 buf[(x, area.y)].set_bg(self.status_bg);
             }
         }
 
-        // ─── Line 2: Compact keybind hints ──────────────────
-        // ? help · ^O model · ^K cmd · ^D dash · ^R voice · ^Q quit
+        // ─── Line 2: Keybind hints ─────────────────────────
+        //  ^O model · ^K cmd · ^D dash · ^R voice · ^Q quit
         if area.height >= 2 {
-            let sep = Style::default().fg(self.muted);
             let key = Style::default().fg(self.accent);
             let label = Style::default().fg(self.muted);
 

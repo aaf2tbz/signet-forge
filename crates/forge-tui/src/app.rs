@@ -762,6 +762,7 @@ impl App {
             success: self.theme.success,
             error: self.theme.error,
             warning: self.theme.warning,
+            spinner: self.theme.spinner,
         };
         status.render(chunks[0], frame.buffer_mut());
 
