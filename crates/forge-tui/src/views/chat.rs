@@ -63,7 +63,9 @@ impl<'a> Widget for ChatView<'a> {
         if self.entries.is_empty() && self.streaming_text.is_empty() {
             let w = area.width as usize;
             let center = |s: &str| -> String {
-                let pad = w.saturating_sub(s.len()) / 2;
+                use unicode_width::UnicodeWidthStr;
+                let display_w = s.width();
+                let pad = w.saturating_sub(display_w) / 2;
                 format!("{}{s}", " ".repeat(pad))
             };
 
