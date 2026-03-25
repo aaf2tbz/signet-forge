@@ -1,8 +1,8 @@
 # Signet Forge — Implementation Roadmap
 
-Six phases from scaffold to production. Phases 1-5 complete. Phase 6 tracks future vision.
+Six phases from scaffold to production. All core phases complete. Phase 6 tracks future vision.
 
-**Current version: v0.5.11** | **12 built-in tools** | **8-crate workspace** | **All 5 core phases shipped**
+**Current version: v1.0.0** | **13+ built-in tools** | **8-crate workspace** | **All phases shipped**
 
 ---
 
@@ -87,19 +87,19 @@ Six phases from scaffold to production. Phases 1-5 complete. Phase 6 tracks futu
 
 Stretch goals and next-generation features.
 
-### Near-term
+### Near-term ✅
 - [x] **Error recovery** — daemon GET/POST retry on connection/timeout errors (1 retry, 500ms delay)
 - [x] **Syntax highlighting** — syntect-based code block coloring (language-aware, dark/light theme)
 - [x] **SSE event stream** — background log stream from `/api/logs/stream`, Logs tab in dashboard panel
-- [ ] **Interactive CLI prompts** — detect/respond to CLI approval prompts from TUI
-- [ ] **Session import** — parse Claude Code `.claude/sessions/` for migration
+- [x] **Interactive CLI prompts** — PTY write-back, approval pattern detection, auto-respond with bypass ON, TUI dialog for manual approval
+- [x] **Session import** — `/import-claude` parses Claude Code JSONL conversations from `~/.claude/projects/`, maps roles/content types
 
-### Medium-term
-- [ ] **Multi-agent support** — thread `agent_id` on all daemon calls, per-agent identity
-- [ ] **Sub-agent tool** — spawn restricted-tool research tasks in parallel
-- [ ] **Marketplace MCP proxy** — route daemon marketplace tools through Forge
-- [ ] **External MCP config** — configure and connect to arbitrary MCP servers
-- [ ] **Installer scripts** — curl-based quick setup for new users
+### Medium-term ✅
+- [x] **Multi-agent support** — `agent_id` threading on all daemon GET/POST, `--agent <name>` CLI flag, per-agent identity files from `~/.agents/agents/{name}/`, `/agent` command
+- [x] **Sub-agent tool** — SubAgent spawns restricted provider call for research tasks, 60s timeout, read-only system prompt
+- [x] **Marketplace MCP proxy** — MarketplaceTool proxies calls to daemon marketplace endpoint, tools discovered at startup
+- [x] **External MCP config** — `~/.config/forge/mcp.json` for arbitrary MCP servers, McpStdioClient per entry, tools merged into agent loop
+- [x] **Installer script** — `install.sh` with OS/arch detection, GitHub release download, PATH check
 
 ### Long-term
 - [ ] **Windowed mode** — embed ratatui in a winit window (WindowedClaude-style)
