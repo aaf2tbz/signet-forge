@@ -160,7 +160,7 @@ impl Provider for CliProvider {
         if self.model.is_empty() {
             match self.cli_kind {
                 CliKind::Claude => "claude-sonnet-4-6",
-                CliKind::Codex => "codex",
+                CliKind::Codex => "o4-mini",
                 CliKind::Gemini => "gemini-2.5-flash",
             }
         } else {
@@ -312,6 +312,7 @@ impl Provider for CliProvider {
                     if line.is_empty() {
                         continue;
                     }
+                    tracing::info!("PTY line [{}]: {}", match cli_kind { CliKind::Claude => "claude", CliKind::Codex => "codex", CliKind::Gemini => "gemini" }, &line);
 
                 match cli_kind {
                     CliKind::Claude => {
@@ -420,11 +421,11 @@ impl Provider for CliProvider {
                         }
                     }
                     CliKind::Codex => {
-                        tracing::debug!("Codex line: {}", &line);
+                        tracing::info!("Codex raw line: {}", &line);
                         let parsed: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(_) => {
-                                tracing::debug!("Codex non-JSON: {}", &line);
+                                tracing::info!("Codex non-JSON: {}", &line);
                                 let _ = tx.blocking_send(StreamEvent::TextDelta(format!("{line}\n")));
                                 continue;
                             }
@@ -437,13 +438,22 @@ impl Provider for CliProvider {
 
                         match event_type {
                             "item.completed" => {
-                                if let Some(text) = parsed
-                                    .get("item")
-                                    .and_then(|i| i.get("text"))
-                                    .and_then(|t| t.as_str())
-                                {
+                                let item = parsed.get("item");
+                                let item_type = item.and_then(|i| i.get("type")).and_then(|t| t.as_str()).unwrap_or("");
+                                if item_type == "error" {
+                                    let msg = item.and_then(|i| i.get("message")).and_then(|m| m.as_str()).unwrap_or("Codex error");
+                                    send!(StreamEvent::Error(msg.to_string()));
+                                } else if let Some(text) = item.and_then(|i| i.get("text")).and_then(|t| t.as_str()) {
                                     send!(StreamEvent::TextDelta(text.to_string()));
                                 }
+                            }
+                            "error" | "turn.failed" => {
+                                let msg = parsed.get("message")
+                                    .or_else(|| parsed.get("error").and_then(|e| e.get("message")))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown error");
+                                send!(StreamEvent::Error(msg.to_string()));
+                                break 'outer;
                             }
                             "turn.completed" => {
                                 if let Some(usage) = parsed.get("usage") {

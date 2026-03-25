@@ -64,7 +64,6 @@ impl ModelPicker {
                 for (model, name, ctx) in &[
                     ("o4-mini", "o4-mini", 200_000),
                     ("gpt-4o", "GPT-4o", 128_000),
-                    ("codex", "Codex (default)", 200_000),
                 ] {
                     models.push(ModelEntry {
                         provider: "codex-cli".into(),
@@ -119,7 +118,6 @@ impl ModelPicker {
                 forge_provider::cli::CliKind::Codex => vec![
                     ("o4-mini", "o4-mini", 200_000),
                     ("gpt-4o", "GPT-4o", 128_000),
-                    ("codex", "Codex (default)", 200_000),
                 ],
                 forge_provider::cli::CliKind::Gemini => vec![
                     ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
@@ -171,7 +169,6 @@ impl ModelPicker {
                 CliKind::Codex => vec![
                     ("o4-mini", "o4-mini", 200_000),
                     ("gpt-4o", "GPT-4o", 128_000),
-                    ("codex", "Codex (default)", 200_000),
                 ],
                 CliKind::Gemini => vec![
                     ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
