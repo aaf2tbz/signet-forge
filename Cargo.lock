@@ -907,6 +907,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "dirs",
  "forge-core",
  "forge-provider",
  "futures",
