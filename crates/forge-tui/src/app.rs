@@ -753,6 +753,7 @@ impl App {
             effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
             active_agent: self.active_agent.as_deref(),
+            agent_name: &self.agent_name,
             keybinds: &self.keybinds,
             status_bg: self.theme.status_bg,
             status_fg: self.theme.status_fg,

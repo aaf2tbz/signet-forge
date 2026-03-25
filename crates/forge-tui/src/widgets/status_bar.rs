@@ -1,12 +1,12 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Widget,
 };
 
-/// Bottom status bar showing model, tokens, and keybindings
+/// Top header bar — identity + model + status
 pub struct StatusBar<'a> {
     pub model: &'a str,
     pub provider: &'a str,
@@ -17,8 +17,8 @@ pub struct StatusBar<'a> {
     pub total_memories: usize,
     pub effort: &'a str,
     pub daemon_healthy: bool,
-    /// Current agent name (None = default)
     pub active_agent: Option<&'a str>,
+    pub agent_name: &'a str,
     pub keybinds: &'a crate::keybinds::KeyBindConfig,
     pub status_bg: Color,
     pub status_fg: Color,
@@ -31,115 +31,123 @@ pub struct StatusBar<'a> {
 
 impl<'a> Widget for StatusBar<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Top line: model info and token usage
-        let token_total = self.input_tokens + self.output_tokens;
-        let token_display = format_tokens(token_total);
-        let context_display = format_tokens(self.context_window);
-
-        let health_indicator = if self.daemon_healthy {
+        // ─── Line 1: Identity + Model ───────────────────────
+        // ◆ Forge · claude-opus-4-6 (claude-cli)                    ● 19/1672 memories
+        let health = if self.daemon_healthy {
             Span::styled("●", Style::default().fg(self.success))
         } else {
             Span::styled("●", Style::default().fg(self.error))
         };
 
-        let agent_span = if let Some(agent) = self.active_agent {
-            Span::styled(
-                format!("[{agent}] "),
-                Style::default().fg(self.accent),
-            )
+        let name = if self.agent_name != "Assistant" {
+            self.agent_name
         } else {
-            Span::styled("", Style::default())
+            "Forge"
         };
 
-        let info_line = Line::from(vec![
-            Span::styled(" [Forge] ", Style::default().fg(self.accent)),
-            agent_span,
+        let mut left = vec![
+            Span::styled(" ◆ ", Style::default().fg(self.accent)),
             Span::styled(
-                format!("{} ({}) ", self.model, self.provider),
+                name,
+                Style::default().fg(self.accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" · ", Style::default().fg(self.muted)),
+            Span::styled(
+                format!("{} ({})", self.model, self.provider),
                 Style::default().fg(self.status_fg),
             ),
-            Span::styled(
-                format!("{token_display}/{context_display} "),
-                Style::default().fg(self.muted),
-            ),
-            health_indicator,
-            Span::styled(" ", Style::default().fg(self.status_fg)),
-            if self.effort != "medium" {
-                Span::styled(
-                    format!("[{}] ", self.effort),
-                    Style::default().fg(if self.effort == "high" {
-                        self.warning
-                    } else {
-                        self.muted
-                    }),
-                )
-            } else {
-                Span::styled("", Style::default().fg(self.status_fg))
-            },
-            if self.total_memories > 0 {
-                Span::styled(
-                    format!(
-                        "{} recalled / {} memories",
-                        self.memories_injected, self.total_memories
-                    ),
-                    Style::default().fg(self.status_fg),
-                )
-            } else {
-                Span::styled(
-                    format!("{} memories", self.memories_injected),
-                    Style::default().fg(self.status_fg),
-                )
-            },
-        ]);
+        ];
 
+        // Effort indicator (only if non-default)
+        if self.effort != "medium" {
+            left.push(Span::styled(" · ", Style::default().fg(self.muted)));
+            left.push(Span::styled(
+                self.effort,
+                Style::default().fg(if self.effort == "high" {
+                    self.warning
+                } else {
+                    self.muted
+                }),
+            ));
+        }
+
+        // Agent indicator
+        if let Some(agent) = self.active_agent {
+            left.push(Span::styled(" · ", Style::default().fg(self.muted)));
+            left.push(Span::styled(
+                format!("@{agent}"),
+                Style::default().fg(self.accent),
+            ));
+        }
+
+        // Right side: health + memories
+        let token_total = self.input_tokens + self.output_tokens;
+        let tokens = format_tokens(token_total);
+        let ctx = format_tokens(self.context_window);
+        let mem_text = if self.total_memories > 0 {
+            format!("{}/{} mem", self.memories_injected, self.total_memories)
+        } else {
+            format!("{} mem", self.memories_injected)
+        };
+        let right_text = format!("{tokens}/{ctx}  {mem_text} ");
+        let right_width = right_text.len() + 3; // health dot + spaces
+
+        // Fill the line
         if area.height >= 1 {
-            buf.set_line(area.x, area.y, &info_line, area.width);
+            buf.set_line(area.x, area.y, &Line::from(left), area.width);
+            // Right-align health + memory info
+            if area.width as usize > right_width {
+                let rx = area.x + area.width - right_width as u16;
+                let right_line = Line::from(vec![
+                    Span::styled(&right_text, Style::default().fg(self.muted)),
+                    health,
+                    Span::styled(" ", Style::default()),
+                ]);
+                buf.set_line(rx, area.y, &right_line, right_width as u16);
+            }
             for x in area.x..area.x + area.width {
-                buf[(x, area.y)]
-                    .set_bg(self.status_bg);
+                buf[(x, area.y)].set_bg(self.status_bg);
             }
         }
 
-        // Bottom line: key bindings — all text uses theme colors
+        // ─── Line 2: Compact keybind hints ──────────────────
+        // ? help · ^O model · ^K cmd · ^D dash · ^R voice · ^Q quit
         if area.height >= 2 {
-            let border = Style::default().fg(self.muted);
+            let sep = Style::default().fg(self.muted);
             let key = Style::default().fg(self.accent);
-            let label = Style::default().fg(self.status_fg);
+            let label = Style::default().fg(self.muted);
 
-            // (action_id, display_label) — reads actual bindings from config
             let hints: &[(&str, &str)] = &[
-                ("model_picker", "Model"),
-                ("command_palette", "Cmd"),
-                ("dashboard", "Dashboard"),
-                ("signet_commands", "Signet"),
-                ("cancel", "Cancel"),
-                ("quit", "Quit"),
-                ("keybinds", "Keybinds"),
-                ("session_browser", "Sessions"),
-                ("voice_input", "Voice"),
+                ("model_picker", "model"),
+                ("command_palette", "cmd"),
+                ("dashboard", "dash"),
+                ("signet_commands", "signet"),
+                ("voice_input", "voice"),
+                ("keybinds", "keys"),
+                ("session_browser", "sessions"),
+                ("quit", "quit"),
             ];
 
-            // Only show hints that fit within terminal width
-            let mut spans = vec![Span::styled(" ", border)];
+            let mut spans = vec![Span::styled(" ", sep)];
             let mut used = 1u16;
-            for (action, name) in hints {
+            for (i, (action, name)) in hints.iter().enumerate() {
                 let combo = self.keybinds.get(action);
-                let hint_width = combo.len() as u16 + name.len() as u16 + 4; // [combo name]_
-                if used + hint_width > area.width {
+                let width = combo.len() as u16 + name.len() as u16 + 1;
+                if used + width + 3 > area.width {
                     break;
                 }
-                spans.push(Span::styled("[", border));
+                if i > 0 {
+                    spans.push(Span::styled(" · ", sep));
+                    used += 3;
+                }
                 spans.push(Span::styled(combo.to_string(), key));
                 spans.push(Span::styled(format!(" {name}"), label));
-                spans.push(Span::styled("] ", border));
-                used += hint_width;
+                used += width;
             }
-            let keys_line = Line::from(spans);
 
-            buf.set_line(area.x, area.y + 1, &keys_line, area.width);
+            buf.set_line(area.x, area.y + 1, &Line::from(spans), area.width);
             for x in area.x..area.x + area.width {
-                buf[(x, area.y + 1)]
-                    .set_bg(self.status_bg);
+                buf[(x, area.y + 1)].set_bg(self.status_bg);
             }
         }
     }
