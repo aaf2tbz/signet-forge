@@ -26,6 +26,16 @@ fn codex_configured_model() -> Option<String> {
     None
 }
 
+fn codex_curated_models() -> Vec<(&'static str, &'static str, usize)> {
+    vec![
+        ("gpt-5.4", "GPT 5.4", 200_000),
+        ("gpt-5.3-codex", "GPT 5.3 Codex", 200_000),
+        ("gpt-5.3-codex-spark", "GPT 5.3 Codex Spark", 200_000),
+        ("gpt-5-codex", "GPT 5 Codex", 200_000),
+        ("codex-mini-latest", "Codex Mini", 200_000),
+    ]
+}
+
 /// A model entry in the picker
 #[derive(Debug, Clone)]
 pub struct ModelEntry {
@@ -80,15 +90,12 @@ impl ModelPicker {
                 }
             }
             "codex-cli" => {
-                for (model, name, ctx) in &[
-                    ("o4-mini", "o4-mini", 200_000),
-                    ("gpt-4o", "GPT-4o", 128_000),
-                ] {
+                for (model, name, ctx) in codex_curated_models() {
                     models.push(ModelEntry {
                         provider: "codex-cli".into(),
                         model: model.to_string(),
                         display_name: format!("{name} (CLI)"),
-                        context_window: *ctx,
+                        context_window: ctx,
                         cli_path: Some(cli_path.to_string()),
                     });
                 }
@@ -158,16 +165,22 @@ impl ModelPicker {
             });
         }
 
-        // Fallback only for connected providers missing registry coverage.
+        // Supplement connected CLI providers with our curated supported-model coverage.
         for provider in connected_providers {
             let provider_name = provider.as_str();
-            if providers_with_registry.contains(provider_name) {
+            if provider_name.ends_with("-cli") {
+                models.extend(fallback_models_for_provider(
+                    provider_name,
+                    cli_paths.get(provider_name).cloned(),
+                ));
                 continue;
             }
-            models.extend(fallback_models_for_provider(
-                provider_name,
-                cli_paths.get(provider_name).cloned(),
-            ));
+            if !providers_with_registry.contains(provider_name) {
+                models.extend(fallback_models_for_provider(
+                    provider_name,
+                    cli_paths.get(provider_name).cloned(),
+                ));
+            }
         }
 
         if models.is_empty() {
@@ -215,10 +228,7 @@ impl ModelPicker {
                     ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
                     ("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200_000),
                 ],
-                CliKind::Codex => vec![
-                    ("o4-mini", "o4-mini", 200_000),
-                    ("gpt-4o", "GPT-4o", 128_000),
-                ],
+                CliKind::Codex => codex_curated_models(),
                 CliKind::Gemini => vec![
                     ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
                     ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000),
@@ -460,8 +470,8 @@ fn fallback_models_for_provider(provider: &str, cli_path: Option<&String>) -> Ve
             },
             ModelEntry {
                 provider: "codex-cli".into(),
-                model: "gpt-5-codex-mini".into(),
-                display_name: "GPT Mini (CLI)".into(),
+                model: "codex-mini-latest".into(),
+                display_name: "Codex Mini (CLI)".into(),
                 context_window: 200_000,
                 cli_path,
             },

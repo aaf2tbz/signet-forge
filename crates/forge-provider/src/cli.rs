@@ -56,14 +56,16 @@ impl CliProvider {
                     "--json".to_string(),
                     "--skip-git-repo-check".to_string(),
                 ];
+                if !self.model.is_empty() {
+                    args.push("--model".to_string());
+                    args.push(self.model.clone());
+                }
                 if opts.bypass {
                     args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
                 } else {
                     // full-auto avoids interactive approval prompts
                     args.push("--full-auto".to_string());
                 }
-                // Don't pass --model or --reasoning-effort to Codex — it
-                // manages its own model selection and doesn't accept either flag.
                 args.push(prompt.to_string());
                 args
             }
@@ -170,7 +172,7 @@ impl Provider for CliProvider {
         if self.model.is_empty() {
             match self.cli_kind {
                 CliKind::Claude => "claude-sonnet-4-6",
-                CliKind::Codex => "o4-mini",
+                CliKind::Codex => "gpt-5.4",
                 CliKind::Gemini => "gemini-2.5-flash",
             }
         } else {
@@ -703,7 +705,7 @@ pub async fn detect_cli_tools() -> Vec<(CliKind, String)> {
 pub fn default_model_for_cli(kind: CliKind) -> &'static str {
     match kind {
         CliKind::Claude => "claude-sonnet-4-6",
-        CliKind::Codex => "codex",
+        CliKind::Codex => "gpt-5.4",
         CliKind::Gemini => "gemini-2.5-flash",
     }
 }
