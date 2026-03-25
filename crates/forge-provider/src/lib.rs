@@ -26,6 +26,8 @@ pub enum StreamEvent {
     Usage(TokenUsage),
     /// Stream is complete
     Done,
+    /// Phase hint for TUI (e.g. "thinking", "planning")
+    Status(String),
     /// An error occurred during streaming
     Error(String),
 }

@@ -269,6 +269,14 @@ impl Provider for CliProvider {
             let mut buf = vec![0u8; 64 * 1024];
             let mut leftover = String::new();
 
+            // Claude CLI: track input tokens from message_start for usage reporting
+            let mut claude_input_tokens: usize = 0;
+
+            // Codex function_call tracking: map call_id → tool name,
+            // and track which calls already emitted ToolUseStart
+            let mut codex_tool_names = std::collections::HashMap::<String, String>::new();
+            let mut codex_started = std::collections::HashSet::<String>::new();
+
             // Macro to send events from the blocking thread
             macro_rules! send {
                 ($event:expr) => {
@@ -367,7 +375,7 @@ impl Provider for CliProvider {
                                             });
                                         }
                                         "thinking" => {
-                                            // Model is in extended thinking mode
+                                            send!(StreamEvent::Status("thinking".to_string()));
                                         }
                                         _ => {}
                                     }
@@ -387,8 +395,11 @@ impl Provider for CliProvider {
                                                 send!(StreamEvent::ToolUseInput(json.to_string()));
                                             }
                                         }
+                                        "thinking_delta" => {
+                                            // Thinking content — keep phase active but don't
+                                            // display to user (matches Claude Code behavior)
+                                        }
                                         _ => {
-                                            // thinking_delta, etc — just show we're working
                                             if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
                                                 send!(StreamEvent::TextDelta(text.to_string()));
                                             }
@@ -419,6 +430,24 @@ impl Provider for CliProvider {
                                     .unwrap_or(false);
                                 send!(StreamEvent::ToolResult { name, output, is_error });
                             }
+                            "message_start" => {
+                                // Input token count from message start
+                                if let Some(usage) = parsed.get("message").and_then(|m| m.get("usage")) {
+                                    let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                                    claude_input_tokens = input;
+                                }
+                            }
+                            "message_delta" => {
+                                // Output token count + stop reason
+                                if let Some(usage) = parsed.get("usage") {
+                                    let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                                    let _ = tx.blocking_send(StreamEvent::Usage(TokenUsage {
+                                        input_tokens: claude_input_tokens,
+                                        output_tokens: output,
+                                        ..Default::default()
+                                    }));
+                                }
+                            }
                             "result" => {
                                 if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
                                     if !result.is_empty() {
@@ -431,11 +460,9 @@ impl Provider for CliProvider {
                         }
                     }
                     CliKind::Codex => {
-                        tracing::info!("Codex raw line: {}", &line);
                         let parsed: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(_) => {
-                                tracing::info!("Codex non-JSON: {}", &line);
                                 let _ = tx.blocking_send(StreamEvent::TextDelta(format!("{line}\n")));
                                 continue;
                             }
@@ -447,14 +474,82 @@ impl Provider for CliProvider {
                             .unwrap_or("");
 
                         match event_type {
+                            // Early notification — tool is starting
+                            "item.created" => {
+                                if let Some(item) = parsed.get("item") {
+                                    let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                    if item_type == "function_call" {
+                                        let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
+                                        let call_id = item.get("call_id")
+                                            .or_else(|| item.get("id"))
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        codex_tool_names.insert(call_id.to_string(), name.to_string());
+                                        codex_started.insert(call_id.to_string());
+                                        send!(StreamEvent::ToolUseStart {
+                                            id: call_id.to_string(),
+                                            name: name.to_string(),
+                                        });
+                                    }
+                                }
+                            }
                             "item.completed" => {
-                                let item = parsed.get("item");
-                                let item_type = item.and_then(|i| i.get("type")).and_then(|t| t.as_str()).unwrap_or("");
-                                if item_type == "error" {
-                                    let msg = item.and_then(|i| i.get("message")).and_then(|m| m.as_str()).unwrap_or("Codex error");
-                                    send!(StreamEvent::Error(msg.to_string()));
-                                } else if let Some(text) = item.and_then(|i| i.get("text")).and_then(|t| t.as_str()) {
-                                    send!(StreamEvent::TextDelta(text.to_string()));
+                                if let Some(item) = parsed.get("item") {
+                                    let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                    match item_type {
+                                        "message" => {
+                                            // Extract text from content array
+                                            if let Some(content) = item.get("content").and_then(|c| c.as_array()) {
+                                                for block in content {
+                                                    let btype = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                                    if btype == "output_text" || btype == "text" {
+                                                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                                            send!(StreamEvent::TextDelta(text.to_string()));
+                                                        }
+                                                    }
+                                                }
+                                            } else if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                                                send!(StreamEvent::TextDelta(text.to_string()));
+                                            }
+                                        }
+                                        "function_call" => {
+                                            let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
+                                            let call_id = item.get("call_id")
+                                                .or_else(|| item.get("id"))
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            codex_tool_names.insert(call_id.to_string(), name.to_string());
+                                            // Emit ToolUseStart if item.created didn't fire
+                                            if !codex_started.contains(call_id) {
+                                                send!(StreamEvent::ToolUseStart {
+                                                    id: call_id.to_string(),
+                                                    name: name.to_string(),
+                                                });
+                                            }
+                                        }
+                                        "function_call_output" => {
+                                            let call_id = item.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
+                                            let name = codex_tool_names.get(call_id)
+                                                .cloned()
+                                                .unwrap_or_else(|| "tool".to_string());
+                                            let output = item.get("output").and_then(|o| o.as_str()).unwrap_or("");
+                                            send!(StreamEvent::ToolResult {
+                                                name,
+                                                output: output.to_string(),
+                                                is_error: false,
+                                            });
+                                        }
+                                        "error" => {
+                                            let msg = item.get("message").and_then(|m| m.as_str()).unwrap_or("Codex error");
+                                            send!(StreamEvent::Error(msg.to_string()));
+                                        }
+                                        _ => {
+                                            // Unknown item type — try text extraction
+                                            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                                                send!(StreamEvent::TextDelta(text.to_string()));
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             "error" | "turn.failed" => {
@@ -481,7 +576,63 @@ impl Provider for CliProvider {
                         }
                     }
                     CliKind::Gemini => {
-                        send!(StreamEvent::TextDelta(format!("{line}\n")));
+                        // Gemini CLI may output JSON or plain text depending on version.
+                        // Attempt structured parsing; fall back to raw text.
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            match event_type {
+                                "text" | "content" => {
+                                    if let Some(text) = parsed.get("text")
+                                        .or_else(|| parsed.get("content"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        send!(StreamEvent::TextDelta(text.to_string()));
+                                    }
+                                }
+                                "tool_call" | "function_call" => {
+                                    let name = parsed.get("name")
+                                        .or_else(|| parsed.get("function_call").and_then(|f| f.get("name")))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("tool");
+                                    let id = parsed.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                                    send!(StreamEvent::ToolUseStart {
+                                        id: id.to_string(),
+                                        name: name.to_string(),
+                                    });
+                                }
+                                "tool_result" | "function_response" => {
+                                    let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                                    let output = parsed.get("output")
+                                        .or_else(|| parsed.get("response"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    send!(StreamEvent::ToolResult {
+                                        name: name.to_string(),
+                                        output: output.to_string(),
+                                        is_error: false,
+                                    });
+                                }
+                                "error" => {
+                                    let msg = parsed.get("message").and_then(|v| v.as_str()).unwrap_or("Gemini error");
+                                    send!(StreamEvent::Error(msg.to_string()));
+                                    break 'outer;
+                                }
+                                "done" | "end" => break 'outer,
+                                _ => {
+                                    // JSON but unknown type — extract text if present
+                                    if let Some(text) = parsed.get("text")
+                                        .or_else(|| parsed.get("content"))
+                                        .or_else(|| parsed.get("message"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        send!(StreamEvent::TextDelta(text.to_string()));
+                                    }
+                                }
+                            }
+                        } else {
+                            // Plain text output
+                            send!(StreamEvent::TextDelta(format!("{line}\n")));
+                        }
                     }
                 }
                 } // end while let Some(nl) — line splitting

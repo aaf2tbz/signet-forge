@@ -270,6 +270,9 @@ impl AgentLoop {
                         }
                         let _ = self.event_tx.send(AgentEvent::Usage(usage)).await;
                     }
+                    StreamEvent::Status(msg) => {
+                        let _ = self.event_tx.send(AgentEvent::Status(msg)).await;
+                    }
                     StreamEvent::Done => break,
                     StreamEvent::Error(e) => {
                         let _ = self.event_tx.send(AgentEvent::Error(e)).await;
