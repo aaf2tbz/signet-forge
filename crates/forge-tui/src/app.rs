@@ -1040,6 +1040,11 @@ impl App {
 
         match action {
             Action::Submit if !self.processing && !self.input.is_empty() => {
+                // Stop voice recording if active (auto-stop on send)
+                if self.voice_recording {
+                    self.stop_voice_recording();
+                }
+
                 let input = self.input.clone();
                 self.input.clear();
                 self.cursor = 0;
