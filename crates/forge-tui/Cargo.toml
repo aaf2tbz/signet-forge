@@ -29,6 +29,7 @@ reqwest = { workspace = true }
 whisper-rs = { version = "0.14", optional = true }
 cpal = { version = "0.15", optional = true }
 libc = "0.2"
+zip = "8.4.0"
 
 [features]
 default = ["voice"]

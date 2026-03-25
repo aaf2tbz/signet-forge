@@ -115,6 +115,12 @@ pub fn all_commands() -> Vec<SignetCommand> {
             description: "Show current agent identity and ID",
             kind: CommandKind::Internal("agent"),
         },
+        SignetCommand {
+            key: "signet-save-agent",
+            label: "/signet-save-agent <path>",
+            description: "Export your entire Signet agent to a zip file",
+            kind: CommandKind::Internal("signet-save-agent"),
+        },
         // Status & Diagnostics
         SignetCommand {
             key: "status",

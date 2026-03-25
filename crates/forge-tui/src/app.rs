@@ -1606,6 +1606,28 @@ impl App {
                                 agent_display, agent_id, self.agent_name
                             )));
                         }
+                        "signet-save-agent" => {
+                            let dest = if args.is_empty() {
+                                dirs::home_dir()
+                                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                                    .join("signet-agent-export.zip")
+                            } else {
+                                std::path::PathBuf::from(args)
+                            };
+                            self.entries.push(ChatEntry::Status(format!(
+                                "Exporting agent to {}...", dest.display()
+                            )));
+                            match export_agent_zip(&dest) {
+                                Ok(count) => {
+                                    self.entries.push(ChatEntry::Status(format!(
+                                        "Agent exported: {} files → {}", count, dest.display()
+                                    )));
+                                }
+                                Err(e) => {
+                                    self.entries.push(ChatEntry::Error(format!("Export failed: {e}")));
+                                }
+                            }
+                        }
                         "forge-bypass" => {
                             let mut b = self.bypass.lock().await;
                             *b = !*b;
@@ -2460,4 +2482,79 @@ fn save_clipboard_image(
     writer.write_image_data(&img.bytes)?;
 
     Ok(())
+}
+
+/// Export the entire Signet agent workspace (~/.agents/) to a zip file.
+/// Includes identity files, config, skills, memory DB, and per-agent dirs.
+fn export_agent_zip(dest: &std::path::Path) -> Result<usize, String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let agents_dir = forge_signet::config::agents_dir();
+    if !agents_dir.exists() {
+        return Err(format!("Agents directory not found: {}", agents_dir.display()));
+    }
+
+    let file = std::fs::File::create(dest)
+        .map_err(|e| format!("Create zip: {e}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let mut count = 0;
+
+    // Walk the agents directory recursively
+    fn add_dir(
+        zip: &mut zip::ZipWriter<std::fs::File>,
+        base: &std::path::Path,
+        dir: &std::path::Path,
+        options: SimpleFileOptions,
+        count: &mut usize,
+    ) -> Result<(), String> {
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| format!("Read dir {}: {e}", dir.display()))?;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let relative = path.strip_prefix(base).unwrap_or(&path);
+            let name = relative.to_string_lossy().to_string();
+
+            // Skip hidden dirs except .secrets and .daemon
+            if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                if fname.starts_with('.') && fname != ".secrets" && fname != ".daemon" {
+                    continue;
+                }
+            }
+
+            // Skip large/binary files that aren't useful for export
+            if name.contains("node_modules") || name.ends_with(".log") {
+                continue;
+            }
+
+            if path.is_dir() {
+                zip.add_directory(&format!("{name}/"), options)
+                    .map_err(|e| format!("Add dir {name}: {e}"))?;
+                add_dir(zip, base, &path, options, count)?;
+            } else {
+                // Skip files > 50MB
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                if size > 50 * 1024 * 1024 {
+                    continue;
+                }
+                zip.start_file(&name, options)
+                    .map_err(|e| format!("Start file {name}: {e}"))?;
+                let data = std::fs::read(&path)
+                    .map_err(|e| format!("Read {name}: {e}"))?;
+                zip.write_all(&data)
+                    .map_err(|e| format!("Write {name}: {e}"))?;
+                *count += 1;
+            }
+        }
+        Ok(())
+    }
+
+    add_dir(&mut zip, &agents_dir, &agents_dir, options, &mut count)?;
+
+    zip.finish().map_err(|e| format!("Finish zip: {e}"))?;
+    Ok(count)
 }
