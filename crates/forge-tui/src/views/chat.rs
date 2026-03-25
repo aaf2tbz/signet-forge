@@ -130,24 +130,22 @@ impl<'a> Widget for ChatView<'a> {
             )));
             lines.push(Line::from(""));
 
-            // The invitation — personalized based on time + agent name
-            let hour = {
-                use std::time::SystemTime;
-                let secs = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                ((secs % 86400) / 3600) as u8 // UTC hour
-                // Rough local adjustment — not perfect but good enough for flavor
-            };
-            let greeting = match hour {
-                5..=11 => format!("good morning. {name}'s ready."),
-                12..=16 => format!("{name}'s here. let's build."),
-                17..=20 => format!("evening. {name}'s locked in."),
-                _ => format!("late night. {name}'s still here."),
-            };
+            // The invitation — Signet-themed, rotates per session
+            let messages: &[&str] = &[
+                "the fire's lit.",
+                "memory is presence.",
+                "identity runs deep.",
+                "forged, not configured.",
+                "your agent remembers.",
+                "built different.",
+                "soul loaded.",
+                "every session leaves a mark.",
+            ];
+            // Pick one based on memory count so it varies per user state
+            let idx = self.total_memories % messages.len();
+            let greeting = messages[idx];
             lines.push(Line::from(Span::styled(
-                center(&greeting),
+                center(greeting),
                 Style::default().fg(t.spinner),
             )));
         }
