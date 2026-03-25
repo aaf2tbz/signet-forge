@@ -62,14 +62,9 @@ impl CliProvider {
                     // full-auto avoids interactive approval prompts
                     args.push("--full-auto".to_string());
                 }
-                // Only pass --model if user explicitly picked a non-default model.
-                // Codex with ChatGPT accounts rejects most model names — let it
-                // use its own default unless user specifically overrides.
-                let codex_defaults = ["", "o4-mini", "codex"];
-                if !self.model.is_empty() && !codex_defaults.contains(&self.model.as_str()) {
-                    args.push("--model".to_string());
-                    args.push(self.model.clone());
-                }
+                // Don't pass --model to Codex — it manages its own model
+                // selection based on account type (API key vs ChatGPT).
+                // Passing model names often fails with ChatGPT accounts.
                 if opts.effort != crate::ReasoningEffort::Medium {
                     args.push("--reasoning-effort".to_string());
                     args.push(opts.effort.as_str().to_string());
