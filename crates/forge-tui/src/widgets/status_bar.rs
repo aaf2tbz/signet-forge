@@ -16,6 +16,7 @@ pub struct StatusBar<'a> {
     pub memories_injected: usize,
     pub total_memories: usize,
     pub total_secrets: usize,
+    pub secrets_used: usize,
     pub effort: &'a str,
     pub daemon_healthy: bool,
     pub active_agent: Option<&'a str>,
@@ -102,7 +103,10 @@ impl<'a> Widget for StatusBar<'a> {
             let right = vec![
                 Span::styled(format!("{tokens}/{ctx}"), Style::default().fg(self.muted)),
                 Span::styled(" │ ", sep),
-                Span::styled(format!("{} secrets", self.total_secrets), Style::default().fg(self.muted)),
+                Span::styled(
+                    format!("{}/{} sec", self.secrets_used, self.total_secrets),
+                    Style::default().fg(if self.secrets_used > 0 { self.success } else { self.muted }),
+                ),
                 Span::styled(" │ ", sep),
                 Span::styled(format!("{mem} mem"), Style::default().fg(self.status_fg)),
                 Span::styled(" │ ", sep),

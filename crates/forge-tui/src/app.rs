@@ -149,6 +149,8 @@ pub struct App {
     total_memories: usize,
     /// Total secrets available in Signet
     total_secrets: usize,
+    /// Secrets used this session (incremented when secret_exec tool runs)
+    secrets_used: usize,
     /// Daemon health status
     daemon_healthy: bool,
     /// Is the agent currently processing?
@@ -405,6 +407,7 @@ impl App {
             memories_injected,
             total_memories,
             total_secrets,
+            secrets_used: 0,
             daemon_healthy,
             processing: false,
             processing_phase: ProcessingPhase::Idle,
@@ -759,6 +762,7 @@ impl App {
             memories_injected: self.memories_injected,
             total_memories: self.total_memories,
             total_secrets: self.total_secrets,
+            secrets_used: self.secrets_used,
             effort: &effort_str,
             daemon_healthy: self.daemon_healthy,
             active_agent: self.active_agent.as_deref(),
@@ -2119,6 +2123,10 @@ impl App {
                 is_error,
                 ..
             } => {
+                // Track secret usage
+                if name == "secret_exec" && !is_error {
+                    self.secrets_used += 1;
+                }
                 // Update tool call status
                 if let Some(entry) = self.entries.iter_mut().rev().find(|e| {
                     matches!(e, ChatEntry::ToolCall { name: n, status: ToolStatus::Running } if *n == name)
