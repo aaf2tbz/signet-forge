@@ -18,7 +18,10 @@ use forge_agent::{
 };
 use forge_provider::{self, Provider};
 use forge_signet::hooks::SessionHooks;
-use forge_signet::secrets::{apply_local_cli_auth_env, resolve_api_key};
+use forge_signet::secrets::{
+    apply_local_cli_auth_env, discover_available_providers, refresh_daemon_model_registry,
+    resolve_api_key,
+};
 use forge_signet::{ConfigEvent, ConfigWatcher, SignetClient};
 use ratatui::{
     layout::{Constraint, Layout},
@@ -269,6 +272,44 @@ impl App {
         self.input.chars().count()
     }
 
+    async fn refresh_connected_models(&mut self) {
+        self.detected_clis = forge_provider::cli::detect_cli_tools().await;
+
+        if let Some(client) = &self.signet_client {
+            let _ = refresh_daemon_model_registry(client).await;
+            if let Ok(resp) = client.get("/api/pipeline/models").await {
+                if let Some(models) = resp.get("models").and_then(|v| v.as_array()) {
+                    self.registry_models = models
+                        .iter()
+                        .filter_map(|m| {
+                            let id = m.get("id")?.as_str()?;
+                            let provider = m.get("provider")?.as_str()?;
+                            let label = m.get("label")?.as_str()?;
+                            let deprecated =
+                                m.get("deprecated").and_then(|v| v.as_bool()).unwrap_or(false);
+                            if deprecated {
+                                return None;
+                            }
+                            Some(crate::views::model_picker::ModelEntry {
+                                provider: provider.to_string(),
+                                model: id.to_string(),
+                                display_name: label.to_string(),
+                                context_window: 200_000,
+                                cli_path: None,
+                            })
+                        })
+                        .collect();
+                }
+            }
+
+            self.connected_providers = discover_available_providers(Some(client))
+                .await
+                .into_iter()
+                .map(|p| p.provider)
+                .collect();
+        }
+    }
+
     fn open_model_picker(&mut self) {
         self.model_picker = Some(ModelPicker::with_all(
             &self.detected_clis,
@@ -484,33 +525,7 @@ impl App {
         // Enable bracketed paste so we can detect drag-and-drop file paths
         let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste);
 
-        // Detect installed CLI tools so model picker always shows them
-        self.detected_clis = forge_provider::cli::detect_cli_tools().await;
-
-        // Fetch models from Signet daemon registry
-        if let Some(client) = &self.signet_client {
-            if let Ok(resp) = client.get("/api/pipeline/models").await {
-                if let Some(models) = resp.get("models").and_then(|v| v.as_array()) {
-                    self.registry_models = models
-                        .iter()
-                        .filter_map(|m| {
-                            let id = m.get("id")?.as_str()?;
-                            let provider = m.get("provider")?.as_str()?;
-                            let label = m.get("label")?.as_str()?;
-                            let deprecated = m.get("deprecated").and_then(|v| v.as_bool()).unwrap_or(false);
-                            if deprecated { return None; }
-                            Some(crate::views::model_picker::ModelEntry {
-                                provider: provider.to_string(),
-                                model: id.to_string(),
-                                display_name: label.to_string(),
-                                context_window: 200_000, // registry doesn't include context size
-                                cli_path: None,
-                            })
-                        })
-                        .collect();
-                }
-            }
-        }
+        self.refresh_connected_models().await;
 
         // Start SSE log stream from daemon (background task)
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel::<String>(64);
@@ -1241,6 +1256,7 @@ impl App {
                 self.should_quit = true;
             }
             Action::ModelPicker if !self.processing => {
+                self.refresh_connected_models().await;
                 self.open_model_picker();
             }
             Action::CommandPalette if !self.processing => {
@@ -1631,6 +1647,7 @@ impl App {
                             self.scroll_offset = 0;
                         }
                         "model" => {
+                            self.refresh_connected_models().await;
                             self.open_model_picker();
                         }
                         "dashboard" => {
@@ -1958,6 +1975,7 @@ impl App {
         match &cmd.kind {
             PaletteCommandKind::BuiltIn(action) => match action.as_str() {
                 "model_picker" => {
+                    self.refresh_connected_models().await;
                     self.open_model_picker();
                 }
                 "clear" => {
