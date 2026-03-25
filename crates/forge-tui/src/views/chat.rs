@@ -213,6 +213,9 @@ impl<'a> Widget for ChatView<'a> {
         }
 
         // Estimate total wrapped lines for scroll calculation.
+        // Word-wrap (Wrap { trim: false }) can produce more lines than char-level
+        // div_ceil because it breaks at word boundaries. Add +1 per wrapped line
+        // to account for this, so we always show at least the last content.
         use unicode_width::UnicodeWidthStr;
         let width = area.width as usize;
         let total: u16 = if width == 0 {
@@ -220,7 +223,9 @@ impl<'a> Widget for ChatView<'a> {
         } else {
             lines.iter().map(|line| {
                 let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
-                1u16.max(w.div_ceil(width) as u16)
+                let raw = w.div_ceil(width) as u16;
+                // If line wraps at all, add 1 for word-boundary overshoot
+                if raw > 1 { raw + 1 } else { 1 }
             }).sum()
         };
 
