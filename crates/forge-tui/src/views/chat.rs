@@ -57,20 +57,53 @@ impl<'a> Widget for ChatView<'a> {
         lines.push(Line::from(""));
         lines.push(Line::from(""));
 
-        // Welcome message if empty
+        // Welcome screen — centered ASCII art landing (inspired by OpenCode)
         if self.entries.is_empty() && self.streaming_text.is_empty() {
+            let logo = [
+                r"  ███████╗ ██████╗ ██████╗  ██████╗ ███████╗",
+                r"  ██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝",
+                r"  █████╗  ██║   ██║██████╔╝██║  ███╗█████╗  ",
+                r"  ██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝  ",
+                r"  ██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗",
+                r"  ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
+            ];
+
+            // Center vertically — push lines to roughly middle of viewport
+            let logo_height = logo.len() + 8; // logo + spacing + text
+            let pad = (area.height as usize).saturating_sub(logo_height) / 3;
+            for _ in 0..pad {
+                lines.push(Line::from(""));
+            }
+
+            // Center horizontally
+            let max_logo_width = logo.iter().map(|l| l.len()).max().unwrap_or(0);
+            let left_pad = (area.width as usize).saturating_sub(max_logo_width) / 2;
+            let spacer = " ".repeat(left_pad);
+
+            for line in &logo {
+                lines.push(Line::from(Span::styled(
+                    format!("{spacer}{line}"),
+                    Style::default().fg(t.accent),
+                )));
+            }
+
             lines.push(Line::from(""));
+
+            // Agent name centered below
+            let name = self.agent_name;
+            let name_pad = " ".repeat((area.width as usize).saturating_sub(name.len()) / 2);
             lines.push(Line::from(Span::styled(
-                "  Welcome to Forge — Signet's native AI terminal.",
-                Style::default().fg(t.accent),
+                format!("{name_pad}{name}"),
+                Style::default().fg(t.fg).add_modifier(Modifier::BOLD),
             )));
+
             lines.push(Line::from(""));
+            lines.push(Line::from(""));
+
+            let hint = "Type a message or Ctrl+R to speak";
+            let hint_pad = " ".repeat((area.width as usize).saturating_sub(hint.len()) / 2);
             lines.push(Line::from(Span::styled(
-                "  Type a message and press Enter to start.",
-                Style::default().fg(t.muted),
-            )));
-            lines.push(Line::from(Span::styled(
-                "  Press Ctrl+Q to quit, Ctrl+O for model picker.",
+                format!("{hint_pad}{hint}"),
                 Style::default().fg(t.muted),
             )));
         }
