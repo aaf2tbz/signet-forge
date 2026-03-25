@@ -63,18 +63,17 @@ impl<'a> Widget for StatusBar<'a> {
                 Style::default().fg(self.muted),
             ));
 
-            // Effort badge
-            if self.effort != "medium" {
-                left.push(Span::styled("  ", sep));
-                left.push(Span::styled(
-                    format!("◈ {}", self.effort),
-                    Style::default().fg(if self.effort == "high" {
-                        self.warning
-                    } else {
-                        self.muted
-                    }),
-                ));
-            }
+            // Effort badge — always visible
+            left.push(Span::styled("  ", sep));
+            let effort_color = match self.effort {
+                "high" => self.warning,
+                "low" => self.muted,
+                _ => self.accent,
+            };
+            left.push(Span::styled(
+                format!("◈ {}", self.effort),
+                Style::default().fg(effort_color),
+            ));
 
             // Agent tag
             if let Some(agent) = self.active_agent {
