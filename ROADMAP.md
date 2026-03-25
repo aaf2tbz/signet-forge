@@ -101,13 +101,12 @@ Stretch goals and next-generation features.
 - [x] **External MCP config** — `~/.config/forge/mcp.json` for arbitrary MCP servers, McpStdioClient per entry, tools merged into agent loop
 - [x] **Installer script** — `install.sh` with OS/arch detection, GitHub release download, PATH check
 
-### Long-term ✅ (5 of 7 complete)
-- [ ] **Windowed mode** — embed ratatui in a winit window (WindowedClaude-style)
+### Long-term ✅
 - [x] **Multi-tab sessions** — Tab struct refactor, Ctrl+T/W/Right/Left, tab bar, background processing on all tabs
 - [x] **Image display** — half-block ANSI art (▄ with fg/bg colors), works in ALL terminals, PNG support
 - [x] **Voice input** — fully local via whisper-rs + cpal, Metal GPU on Apple Silicon, 142MB model auto-download, interim transcription every ~2s
 - [x] **Agent-to-agent** — presence heartbeat, /peers /send /inbox commands, 3 native tools, SSE message listener
-- [ ] **Remote sessions** — Forge on a server, accessed via SSH (already works, needs docs)
+- [x] **Remote sessions** — works natively via SSH (Forge is a TUI)
 - [x] **Plugin system** — executable plugins from ~/.config/forge/plugins/, --manifest discovery, --execute protocol
 
 ---
