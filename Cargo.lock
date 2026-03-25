@@ -937,6 +937,7 @@ dependencies = [
  "forge-provider",
  "forge-signet",
  "futures",
+ "libc",
  "png 0.17.16",
  "pulldown-cmark",
  "ratatui",

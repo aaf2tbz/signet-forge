@@ -796,7 +796,7 @@ impl App {
             let placeholder = if self.voice_recording {
                 " Listening..."
             } else {
-                " Type a message..."
+                " Type a message or Ctrl+R to speak..."
             };
             Paragraph::new(Span::styled(
                 placeholder,

@@ -165,11 +165,27 @@ pub fn transcribe(
         return Ok(String::new());
     }
 
+    // Suppress whisper.cpp's verbose GGML/Metal init logs from flooding the TUI.
+    // Redirect stderr to /dev/null during model load, restore after.
+    #[cfg(unix)]
+    let stderr_guard = {
+        use std::os::unix::io::AsRawFd;
+        let old = unsafe { libc::dup(2) };
+        if let Ok(devnull) = std::fs::File::open("/dev/null") {
+            unsafe { libc::dup2(devnull.as_raw_fd(), 2); }
+        }
+        old
+    };
+
     let ctx = WhisperContext::new_with_params(
         model_path.to_str().unwrap_or(""),
         WhisperContextParameters::default(),
     )
     .map_err(|e| format!("Load model: {e}"))?;
+
+    // Restore stderr
+    #[cfg(unix)]
+    unsafe { libc::dup2(stderr_guard, 2); libc::close(stderr_guard); }
 
     let mut state = ctx
         .create_state()
