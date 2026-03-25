@@ -24,7 +24,7 @@ Forge solves this by being the harness. There's no host memory system to fight b
 | Identity | Injected via hooks | Native — loaded at startup |
 | Agent name | Generic "Assistant" | From IDENTITY.md (e.g. [Boogy]) |
 
-> See [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md) for the full technical breakdown.
+> See [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md) for the memory architecture and [docs/AUTH_AND_MODELS.md](docs/AUTH_AND_MODELS.md) for auth/model discovery behavior.
 
 ---
 
@@ -172,7 +172,7 @@ On first run, Forge checks for Signet, offers to install it, runs setup, starts 
 | **Groq / OpenRouter / xAI** | OpenAI-compatible APIs |
 | **Ollama** | Any local model, no key needed |
 
-Model picker (Ctrl+O) always shows API + CLI models. Daemon registry models merge in when available. Your choice persists across sessions.
+Model picker (Ctrl+O) now shows only connected/authenticated providers. Forge prefers Signet registry models when available, so newer versions can surface automatically without waiting on Forge-only hardcoded lists. Your choice persists across sessions.
 
 ---
 
@@ -206,6 +206,26 @@ forge --no-daemon                        # Standalone, no Signet
 Forge stores local auth values in your platform config dir:
 - macOS: `~/Library/Application Support/forge/credentials.json`
 - Linux: `~/.config/forge/credentials.json`
+
+### Automatic auth + model discovery
+
+Forge now discovers providers from all of these layers:
+
+- environment variables
+- Forge local credentials
+- Signet secrets
+- authenticated CLI logins
+- Ollama
+
+When Forge connects to Signet, it will automatically import matching API keys from Signet secrets into Forge's local credential store if Forge does not already have a local key for that provider. After that, Forge requests a Signet model-registry refresh so newly connected providers can expose their models immediately.
+
+CLI providers are only treated as connected when they are actually authenticated:
+
+- `claude-cli` via `claude auth status`
+- `codex-cli` via `codex login status`
+- `gemini-cli` via saved/env auth
+
+That means `/model` and the model picker are now aligned to what is really usable, instead of showing every hardcoded provider by default.
 
 ### Signet daemon auth
 

@@ -1,8 +1,10 @@
 use crate::client::SignetClient;
 use forge_core::ForgeError;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use tokio::process::Command;
 use tracing::debug;
 
 /// API providers Forge supports directly.
@@ -80,7 +82,15 @@ fn provider_env_keys(provider: &str) -> &'static [&'static str] {
 fn cli_env_keys(provider: &str) -> &'static [&'static str] {
     match provider {
         "claude-cli" => &["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"],
-        "codex-cli" => &["CODEX_API_KEY", "OPENAI_API_KEY"],
+        "codex-cli" => &[
+            "CODEX_API_KEY",
+            "OPENAI_API_KEY",
+            "CODEX_AUTH_MODE",
+            "CODEX_ACCESS_TOKEN",
+            "CODEX_ID_TOKEN",
+            "CODEX_REFRESH_TOKEN",
+            "CODEX_ACCOUNT_ID",
+        ],
         "gemini-cli" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         _ => &[],
     }
@@ -216,7 +226,74 @@ pub fn apply_local_cli_auth_env(provider: &str) -> usize {
         std::env::set_var(&k, &v);
         applied += 1;
     }
+
+    if provider == "codex-cli" {
+        let _ = sync_codex_auth_file_from_env();
+    }
+
     applied
+}
+
+fn codex_auth_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codex")
+        .join("auth.json")
+}
+
+fn sync_codex_auth_file_from_env() -> Result<(), ForgeError> {
+    let auth_mode = std::env::var("CODEX_AUTH_MODE").ok();
+    let access_token = std::env::var("CODEX_ACCESS_TOKEN").ok();
+    let id_token = std::env::var("CODEX_ID_TOKEN").ok();
+    let refresh_token = std::env::var("CODEX_REFRESH_TOKEN").ok();
+    let account_id = std::env::var("CODEX_ACCOUNT_ID").ok();
+
+    if auth_mode.as_deref().unwrap_or("").trim().is_empty()
+        && access_token.as_deref().unwrap_or("").trim().is_empty()
+        && id_token.as_deref().unwrap_or("").trim().is_empty()
+        && refresh_token.as_deref().unwrap_or("").trim().is_empty()
+        && account_id.as_deref().unwrap_or("").trim().is_empty()
+    {
+        return Ok(());
+    }
+
+    let mut tokens = Map::new();
+    if let Some(value) = id_token.filter(|v| !v.trim().is_empty()) {
+        tokens.insert("id_token".to_string(), Value::String(value));
+    }
+    if let Some(value) = access_token.filter(|v| !v.trim().is_empty()) {
+        tokens.insert("access_token".to_string(), Value::String(value));
+    }
+    if let Some(value) = refresh_token.filter(|v| !v.trim().is_empty()) {
+        tokens.insert("refresh_token".to_string(), Value::String(value));
+    }
+    if let Some(value) = account_id.filter(|v| !v.trim().is_empty()) {
+        tokens.insert("account_id".to_string(), Value::String(value));
+    }
+
+    let mut root = Map::new();
+    root.insert(
+        "auth_mode".to_string(),
+        Value::String(
+            auth_mode
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(|| "chatgpt".to_string()),
+        ),
+    );
+    root.insert("OPENAI_API_KEY".to_string(), Value::Null);
+    root.insert("tokens".to_string(), Value::Object(tokens));
+
+    let path = codex_auth_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&Value::Object(root))?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 /// List all secret names stored in the Signet daemon
@@ -232,6 +309,135 @@ pub async fn list_daemon_secrets(client: &SignetClient) -> Result<Vec<String>, F
         })
         .unwrap_or_default();
     Ok(secrets)
+}
+
+async fn resolve_daemon_secret_value(
+    client: &SignetClient,
+    secret_name: &str,
+) -> Result<Option<String>, ForgeError> {
+    let body = serde_json::json!({
+        "command": format!("printenv {secret_name}"),
+        "secrets": {
+            secret_name: secret_name,
+        }
+    });
+
+    let result = client.post("/api/secrets/exec", &body).await?;
+    let code = result.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let stdout = result
+        .get("stdout")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if code == 0 && !stdout.is_empty() {
+        Ok(Some(stdout))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Import API keys from Signet secrets into Forge's local credential store.
+/// Existing local Forge keys are preserved.
+pub async fn sync_local_api_keys_from_daemon(
+    client: &SignetClient,
+) -> Result<Vec<DiscoveredProvider>, ForgeError> {
+    let daemon_secrets = list_daemon_secrets(client).await?;
+    let mut imported = Vec::new();
+
+    for provider in API_PROVIDERS {
+        if local_api_key(provider).is_some() {
+            continue;
+        }
+
+        let matched = provider_env_keys(provider)
+            .iter()
+            .find(|key| daemon_secrets.iter().any(|s| s == **key));
+
+        let Some(secret_name) = matched else {
+            continue;
+        };
+
+        let Some(secret_value) = resolve_daemon_secret_value(client, secret_name).await? else {
+            continue;
+        };
+
+        store_local_api_key(provider, &secret_value)?;
+        imported.push(DiscoveredProvider {
+            provider: (*provider).to_string(),
+            secret_name: (*secret_name).to_string(),
+            source: KeySource::Daemon,
+        });
+    }
+
+    Ok(imported)
+}
+
+/// Ask the Signet daemon to refresh its model registry.
+pub async fn refresh_daemon_model_registry(client: &SignetClient) -> Result<(), ForgeError> {
+    let _ = client
+        .post("/api/pipeline/models/refresh", &serde_json::json!({}))
+        .await?;
+    Ok(())
+}
+
+async fn detect_cli_auth(provider_name: &str, binary: &str) -> Option<String> {
+    if local_cli_auth_env(provider_name).is_some() {
+        return Some("token saved".to_string());
+    }
+
+    match provider_name {
+        "claude-cli" => {
+            let output = Command::new(binary)
+                .args(["auth", "status", "--json"])
+                .output()
+                .await
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let status = serde_json::from_slice::<Value>(&output.stdout).ok()?;
+            if status
+                .get("loggedIn")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                Some("logged in".to_string())
+            } else {
+                None
+            }
+        }
+        "codex-cli" => {
+            let output = Command::new(binary)
+                .args(["login", "status"])
+                .output()
+                .await
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            if stdout.contains("logged in") {
+                Some("logged in".to_string())
+            } else {
+                None
+            }
+        }
+        "gemini-cli" => {
+            for env_name in cli_env_keys(provider_name) {
+                if std::env::var(env_name)
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .is_some()
+                {
+                    return Some("env key".to_string());
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Discover all providers available — daemon secrets, env vars, and installed CLI tools.
@@ -302,7 +508,7 @@ pub async fn discover_available_providers(
         }
     }
 
-    // 4. Detect installed CLI tools
+    // 4. Detect installed + authenticated CLI tools
     let cli_checks: &[(&str, &str)] = &[
         ("claude-cli", "claude"),
         ("codex-cli", "codex"),
@@ -318,17 +524,14 @@ pub async fn discover_available_providers(
             if output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path.is_empty() {
-                    let auth_tag = if local_cli_auth_env(provider_name).is_some() {
-                        "token saved"
-                    } else {
-                        "installed"
-                    };
-                    debug!("Found CLI tool: {binary} at {path}");
-                    found.push(DiscoveredProvider {
-                        provider: provider_name.to_string(),
-                        secret_name: format!("{binary} ({auth_tag})"),
-                        source: KeySource::Cli { path },
-                    });
+                    if let Some(auth_tag) = detect_cli_auth(provider_name, binary).await {
+                        debug!("Found authenticated CLI tool: {binary} at {path}");
+                        found.push(DiscoveredProvider {
+                            provider: provider_name.to_string(),
+                            secret_name: format!("{binary} ({auth_tag})"),
+                            source: KeySource::Cli { path },
+                        });
+                    }
                 }
             }
         }
@@ -383,31 +586,13 @@ pub async fn resolve_api_key(
     if let Some(client) = client {
         for env_name in provider_env_keys(provider) {
             let env_name = *env_name;
-            let body = serde_json::json!({
-                "command": format!("printenv {env_name}"),
-                "secrets": {
-                    env_name: env_name,
+            match resolve_daemon_secret_value(client, env_name).await {
+                Ok(Some(secret)) => {
+                    debug!("Resolved {env_name} from daemon secret store");
+                    return Ok(secret);
                 }
-            });
-
-            match client.post("/api/secrets/exec", &body).await {
-                Ok(result) => {
-                    let code = result.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-                    let stdout = result
-                        .get("stdout")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-
-                    if code == 0 && !stdout.is_empty() {
-                        debug!("Resolved {env_name} from daemon secret store");
-                        return Ok(stdout);
-                    }
-                    debug!(
-                        "Daemon exec returned code={code}, stdout empty={} for {env_name}",
-                        stdout.is_empty()
-                    );
+                Ok(None) => {
+                    debug!("Daemon secret empty or unavailable for {env_name}");
                 }
                 Err(e) => {
                     debug!("Daemon secret exec failed for {env_name}: {e}");

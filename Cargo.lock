@@ -871,7 +871,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "forge-agent"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -895,9 +895,10 @@ dependencies = [
 
 [[package]]
 name = "forge-cli"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "crossterm",
  "dirs",
@@ -910,6 +911,7 @@ dependencies = [
  "futures",
  "ratatui",
  "reqwest",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -917,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "forge-core"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "chrono",
  "reqwest",
@@ -929,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "forge-mcp"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -945,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "forge-provider"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -965,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "forge-signet"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -985,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "forge-tools"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1007,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "forge-tui"
-version = "1.1.7"
+version = "1.1.8"
 dependencies = [
  "anyhow",
  "arboard",

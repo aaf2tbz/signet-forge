@@ -145,6 +145,8 @@ pub struct App {
     detected_clis: Vec<(forge_provider::cli::CliKind, String)>,
     /// Models from daemon registry (fetched at startup)
     registry_models: Vec<crate::views::model_picker::ModelEntry>,
+    /// Providers actually connected/authenticated at startup
+    connected_providers: Vec<String>,
     /// Current reasoning effort level (shared with agent loop)
     effort: Arc<Mutex<forge_provider::ReasoningEffort>>,
     /// CLI permission bypass — skips all approval prompts on next spawn
@@ -267,6 +269,14 @@ impl App {
         self.input.chars().count()
     }
 
+    fn open_model_picker(&mut self) {
+        self.model_picker = Some(ModelPicker::with_all(
+            &self.detected_clis,
+            &self.registry_models,
+            &self.connected_providers,
+        ));
+    }
+
     pub async fn new(
         provider: Arc<dyn Provider>,
         signet_client: Option<SignetClient>,
@@ -274,6 +284,7 @@ impl App {
         cli_path: Option<String>,
         theme_name: &str,
         active_agent: Option<String>,
+        connected_providers: Vec<String>,
     ) -> Self {
         let model = provider.model().to_string();
         let provider_name = provider.name().to_string();
@@ -412,6 +423,7 @@ impl App {
             cli_path,
             detected_clis: Vec::new(),
             registry_models: Vec::new(),
+            connected_providers,
             effort,
             bypass,
             memories_injected,
@@ -1229,7 +1241,7 @@ impl App {
                 self.should_quit = true;
             }
             Action::ModelPicker if !self.processing => {
-                self.model_picker = Some(ModelPicker::with_all(&self.detected_clis, &self.registry_models));
+                self.open_model_picker();
             }
             Action::CommandPalette if !self.processing => {
                 self.command_palette = Some(CommandPalette::new(&self.skills));
@@ -1619,7 +1631,7 @@ impl App {
                             self.scroll_offset = 0;
                         }
                         "model" => {
-                            self.model_picker = Some(ModelPicker::with_all(&self.detected_clis, &self.registry_models));
+                            self.open_model_picker();
                         }
                         "dashboard" => {
                             self.dashboard_nav = Some(DashboardNav::new());
@@ -1946,12 +1958,7 @@ impl App {
         match &cmd.kind {
             PaletteCommandKind::BuiltIn(action) => match action.as_str() {
                 "model_picker" => {
-                    if self.provider_name.ends_with("-cli") {
-                        let path = self.cli_path.clone().unwrap_or_default();
-                        self.model_picker = Some(ModelPicker::with_cli(&self.provider_name, &path));
-                    } else {
-                        self.model_picker = Some(ModelPicker::new());
-                    }
+                    self.open_model_picker();
                 }
                 "clear" => {
                     self.entries.clear();

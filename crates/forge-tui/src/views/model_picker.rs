@@ -1,4 +1,5 @@
 use crate::theme::Theme;
+use std::collections::{HashMap, HashSet};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -122,64 +123,77 @@ impl ModelPicker {
     pub fn with_all(
         clis: &[(forge_provider::cli::CliKind, String)],
         registry: &[ModelEntry],
+        connected_providers: &[String],
     ) -> Self {
         let mut models = Vec::new();
+        let connected: HashSet<&str> = connected_providers.iter().map(|s| s.as_str()).collect();
+        let cli_paths: HashMap<&str, &String> = clis
+            .iter()
+            .map(|(kind, path)| (cli_kind_provider(kind), path))
+            .collect();
+        let mut providers_with_registry = HashSet::new();
 
-        // CLI models first
-        for (kind, path) in clis {
-            let entries: Vec<(&str, &str, usize)> = match kind {
-                forge_provider::cli::CliKind::Claude => vec![
-                    ("claude-opus-4-6", "Claude Opus 4.6", 200_000),
-                    ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
-                    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200_000),
-                ],
-                forge_provider::cli::CliKind::Codex => {
-                    let v: Vec<(&str, &str, usize)> = vec![
-                        ("o4-mini", "o4-mini", 200_000),
-                        ("gpt-4o", "GPT-4o", 128_000),
-                    ];
-                    // Insert configured model at top if different
-                    if let Some(ref configured) = codex_configured_model() {
-                        if !v.iter().any(|(m, _, _)| *m == configured.as_str()) {
-                            // Can't push &str from owned String into static tuple,
-                            // so push a ModelEntry directly
-                            models.push(ModelEntry {
-                                provider: "codex-cli".into(),
-                                model: configured.clone(),
-                                display_name: format!("{configured} (configured) (CLI)"),
-                                context_window: 200_000,
-                                cli_path: Some(path.clone()),
-                            });
-                        }
-                    }
-                    v
-                },
-                forge_provider::cli::CliKind::Gemini => vec![
-                    ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000),
-                    ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000),
-                ],
-            };
-            let provider = match kind {
-                forge_provider::cli::CliKind::Claude => "claude-cli",
-                forge_provider::cli::CliKind::Codex => "codex-cli",
-                forge_provider::cli::CliKind::Gemini => "gemini-cli",
-            };
-            for (model, name, ctx) in entries {
-                models.push(ModelEntry {
-                    provider: provider.into(),
-                    model: model.to_string(),
-                    display_name: format!("{name} (CLI)"),
-                    context_window: ctx,
-                    cli_path: Some(path.clone()),
-                });
+        // Prefer daemon registry models, filtered down to connected providers only.
+        for entry in registry {
+            let provider = normalize_registry_provider(&entry.provider);
+            if !connected.contains(provider) {
+                continue;
             }
+            if provider.ends_with("-cli") && !cli_paths.contains_key(provider) {
+                continue;
+            }
+
+            providers_with_registry.insert(provider.to_string());
+            let cli_path = cli_paths.get(provider).map(|p| (*p).clone());
+            models.push(ModelEntry {
+                provider: provider.to_string(),
+                model: entry.model.clone(),
+                display_name: if provider.ends_with("-cli") {
+                    format!("{} (CLI)", entry.display_name)
+                } else {
+                    entry.display_name.clone()
+                },
+                context_window: entry.context_window,
+                cli_path,
+            });
         }
 
-        // Daemon registry models (if available)
-        if !registry.is_empty() {
-            models.extend(registry.iter().cloned());
-        } else {
+        // Fallback only for connected providers missing registry coverage.
+        for provider in connected_providers {
+            let provider_name = provider.as_str();
+            if providers_with_registry.contains(provider_name) {
+                continue;
+            }
+            models.extend(fallback_models_for_provider(
+                provider_name,
+                cli_paths.get(provider_name).cloned(),
+            ));
+        }
+
+        if models.is_empty() {
             models.extend(default_models());
+        }
+
+        dedupe_models(&mut models);
+
+        if connected.contains("codex-cli") {
+            if let Some(configured) = codex_configured_model() {
+                let already_present = models
+                    .iter()
+                    .any(|m| m.provider == "codex-cli" && m.model == configured);
+                if !already_present {
+                    models.insert(
+                        0,
+                        ModelEntry {
+                            provider: "codex-cli".into(),
+                            model: configured.clone(),
+                            display_name: format!("{configured} (configured) (CLI)"),
+                            context_window: 200_000,
+                            cli_path: cli_paths.get("codex-cli").map(|p| (*p).clone()),
+                        },
+                    );
+                }
+            }
         }
 
         Self {
@@ -365,6 +379,113 @@ impl ModelPicker {
 
         let paragraph = Paragraph::new(lines).block(block);
         frame.render_widget(paragraph, dialog_area);
+    }
+}
+
+fn cli_kind_provider(kind: &forge_provider::cli::CliKind) -> &'static str {
+    match kind {
+        forge_provider::cli::CliKind::Claude => "claude-cli",
+        forge_provider::cli::CliKind::Codex => "codex-cli",
+        forge_provider::cli::CliKind::Gemini => "gemini-cli",
+    }
+}
+
+fn normalize_registry_provider(provider: &str) -> &str {
+    match provider {
+        "claude-code" => "claude-cli",
+        "codex" => "codex-cli",
+        _ => provider,
+    }
+}
+
+fn dedupe_models(models: &mut Vec<ModelEntry>) {
+    let mut seen = HashSet::new();
+    models.retain(|m| seen.insert((m.provider.clone(), m.model.clone())));
+}
+
+fn fallback_models_for_provider(provider: &str, cli_path: Option<&String>) -> Vec<ModelEntry> {
+    let cli_path = cli_path.cloned();
+    match provider {
+        "claude-cli" => vec![
+            ModelEntry {
+                provider: "claude-cli".into(),
+                model: "claude-opus-4-6".into(),
+                display_name: "Claude Opus 4.6 (CLI)".into(),
+                context_window: 200_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "claude-cli".into(),
+                model: "claude-sonnet-4-6".into(),
+                display_name: "Claude Sonnet 4.6 (CLI)".into(),
+                context_window: 200_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "claude-cli".into(),
+                model: "claude-haiku-4-5-20251001".into(),
+                display_name: "Claude Haiku 4.5 (CLI)".into(),
+                context_window: 200_000,
+                cli_path,
+            },
+        ],
+        "codex-cli" => vec![
+            ModelEntry {
+                provider: "codex-cli".into(),
+                model: "gpt-5.4".into(),
+                display_name: "GPT 5.4 (CLI)".into(),
+                context_window: 200_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "codex-cli".into(),
+                model: "gpt-5.3-codex".into(),
+                display_name: "GPT 5.3 Codex (CLI)".into(),
+                context_window: 200_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "codex-cli".into(),
+                model: "gpt-5.3-codex-spark".into(),
+                display_name: "GPT 5.3 Codex Spark (CLI)".into(),
+                context_window: 200_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "codex-cli".into(),
+                model: "gpt-5-codex".into(),
+                display_name: "GPT 5 Codex (CLI)".into(),
+                context_window: 200_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "codex-cli".into(),
+                model: "gpt-5-codex-mini".into(),
+                display_name: "GPT Mini (CLI)".into(),
+                context_window: 200_000,
+                cli_path,
+            },
+        ],
+        "gemini-cli" => vec![
+            ModelEntry {
+                provider: "gemini-cli".into(),
+                model: "gemini-2.5-flash".into(),
+                display_name: "Gemini 2.5 Flash (CLI)".into(),
+                context_window: 1_000_000,
+                cli_path: cli_path.clone(),
+            },
+            ModelEntry {
+                provider: "gemini-cli".into(),
+                model: "gemini-2.5-pro".into(),
+                display_name: "Gemini 2.5 Pro (CLI)".into(),
+                context_window: 1_000_000,
+                cli_path,
+            },
+        ],
+        other => default_models()
+            .into_iter()
+            .filter(|m| m.provider == other)
+            .collect(),
     }
 }
 

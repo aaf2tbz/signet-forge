@@ -13,7 +13,8 @@ use forge_provider::create_provider;
 use forge_signet::config::{build_agent_identity_prompt, build_identity_prompt, load_agent_config};
 use forge_signet::secrets::{
     apply_local_cli_auth_env, default_model_for_provider, discover_available_providers,
-    resolve_api_key, DiscoveredProvider, KeySource,
+    refresh_daemon_model_registry, resolve_api_key, sync_local_api_keys_from_daemon,
+    DiscoveredProvider, KeySource,
 };
 use forge_signet::SignetClient;
 use forge_tui::App;
@@ -167,7 +168,28 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Discover available providers — API keys, CLI tools, local models
+    // Pull API keys from Signet secrets into Forge local config automatically.
+    if let Some(client) = signet_client.as_ref() {
+        match sync_local_api_keys_from_daemon(client).await {
+            Ok(imported) if !imported.is_empty() => {
+                info!(
+                    "Imported Signet secrets into Forge local credentials: {}",
+                    imported
+                        .iter()
+                        .map(|p| p.provider.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                if let Err(e) = refresh_daemon_model_registry(client).await {
+                    warn!("Could not refresh Signet model registry after secret sync: {e}");
+                }
+            }
+            Ok(_) => {}
+            Err(e) => warn!("Could not sync Signet secrets into Forge credentials: {e}"),
+        }
+    }
+
+    // Discover available providers — API keys, authenticated CLI tools, local models
     let mut available = discover_available_providers(signet_client.as_ref()).await;
 
     // If nothing but bare Ollama is available, offer Forge auth setup.
@@ -189,6 +211,7 @@ async fn main() -> Result<()> {
             }
         }
     }
+    let connected_providers: Vec<String> = available.iter().map(|p| p.provider.clone()).collect();
 
     // Load persistent settings (model, provider, effort from last session)
     let settings = forge_tui::settings::Settings::load();
@@ -278,7 +301,16 @@ async fn main() -> Result<()> {
 
     // Interactive TUI mode
     let mut terminal = ratatui::init();
-    let mut app = App::new(provider, signet_client, system_prompt, active_cli_path, &cli_with_defaults.theme, agent_arg).await;
+    let mut app = App::new(
+        provider,
+        signet_client,
+        system_prompt,
+        active_cli_path,
+        &cli_with_defaults.theme,
+        agent_arg,
+        connected_providers,
+    )
+    .await;
 
     // Apply saved effort from settings
     if let Some(ref effort_str) = settings.effort {

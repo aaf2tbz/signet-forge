@@ -423,6 +423,7 @@ async fn setup_cli_provider(
             setup_cli_token(provider)?;
         }
         CliAuthMethod::AuthLogin => {
+            let _ = clear_local_cli_auth(provider.id);
             run_cli_login(binary, login_args).await?;
         }
         CliAuthMethod::Skip => {
@@ -441,6 +442,16 @@ enum CliAuthMethod {
 }
 
 fn choose_cli_auth_method() -> Result<CliAuthMethod> {
+    if std::io::stdin().is_terminal() && std::io::stderr().is_terminal() {
+        match interactive_choose_cli_auth_method() {
+            Ok(Some(method)) => return Ok(method),
+            Ok(None) => return Ok(CliAuthMethod::Skip),
+            Err(e) => {
+                eprintln!("Interactive auth-method selector unavailable ({e}). Falling back to simple prompt.");
+            }
+        }
+    }
+
     println!();
     println!("Choose auth method:");
     println!("  1) Paste auth/API token");
@@ -457,6 +468,96 @@ fn choose_cli_auth_method() -> Result<CliAuthMethod> {
             Ok(CliAuthMethod::PasteToken)
         }
     }
+}
+
+fn interactive_choose_cli_auth_method() -> Result<Option<CliAuthMethod>> {
+    let options = [
+        ("Paste auth/API token", "Save a token locally and inject it into the CLI env."),
+        ("Run auth login flow", "Launch the provider's browser/device login flow."),
+        ("Skip", "Leave this provider unchanged for now."),
+    ];
+
+    let mut stderr = std::io::stderr();
+
+    terminal::enable_raw_mode()?;
+    execute!(stderr, cursor::Hide)?;
+    let (_, start_row) = cursor::position()?;
+
+    let mut cursor_idx = 0usize;
+
+    let result = loop {
+        execute!(
+            stderr,
+            cursor::MoveTo(0, start_row),
+            terminal::Clear(ClearType::FromCursorDown)
+        )?;
+
+        write!(stderr, "\r\n")?;
+        write!(stderr, "  {}\r\n", "Choose auth method".bold())?;
+        write!(
+            stderr,
+            "  {}\r\n",
+            "↑/↓ move  Space/Enter select  q cancel".dark_grey()
+        )?;
+        write!(stderr, "\r\n")?;
+
+        for (i, (label, help)) in options.iter().enumerate() {
+            let marker = if i == cursor_idx { "▸" } else { " " };
+            if i == cursor_idx {
+                writeln!(
+                    stderr,
+                    "  {} {}\r",
+                    marker.bold().cyan(),
+                    label.bold().white()
+                )?;
+                writeln!(stderr, "      {}\r", help.dark_grey())?;
+            } else {
+                writeln!(stderr, "  {} {}\r", marker, label)?;
+                writeln!(stderr, "      {}\r", help.dark_grey())?;
+            }
+        }
+
+        stderr.flush()?;
+
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    cursor_idx = cursor_idx.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if cursor_idx + 1 < options.len() {
+                        cursor_idx += 1;
+                    }
+                }
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    let method = match cursor_idx {
+                        0 => CliAuthMethod::PasteToken,
+                        1 => CliAuthMethod::AuthLogin,
+                        _ => CliAuthMethod::Skip,
+                    };
+                    break Some(method);
+                }
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    break None;
+                }
+                _ => {}
+            }
+        }
+    };
+
+    execute!(
+        stderr,
+        cursor::MoveTo(0, start_row),
+        terminal::Clear(ClearType::FromCursorDown),
+        cursor::Show
+    )?;
+    terminal::disable_raw_mode()?;
+    eprintln!();
+
+    Ok(result)
 }
 
 fn setup_cli_token(provider: AuthProvider) -> Result<()> {
@@ -477,14 +578,18 @@ fn setup_cli_token(provider: AuthProvider) -> Result<()> {
 
     let prompt = match provider.id {
         "claude-cli" => {
-            "Paste Claude auth token OR Anthropic API key (leave empty to cancel): "
+            "Paste Claude auth token/API key, :clipboard, or @/path/to/file (leave empty to cancel): "
         }
-        "codex-cli" => "Paste Codex auth token OR OpenAI API key (leave empty to cancel): ",
-        "gemini-cli" => "Paste Gemini token/API key (leave empty to cancel): ",
-        _ => "Paste token (leave empty to cancel): ",
+        "codex-cli" => {
+            "Paste Codex auth.json contents, access/id token, :clipboard, or @/path/to/file (leave empty to cancel): "
+        }
+        "gemini-cli" => {
+            "Paste Gemini token/API key, :clipboard, or @/path/to/file (leave empty to cancel): "
+        }
+        _ => "Paste token, :clipboard, or @/path/to/file (leave empty to cancel): ",
     };
 
-    let token = read_line(prompt)?;
+    let token = read_secret_input(prompt)?;
     let token = token.trim();
     if token.is_empty() {
         println!("No token entered. Cancelled.");
@@ -509,6 +614,56 @@ fn setup_cli_token(provider: AuthProvider) -> Result<()> {
     Ok(())
 }
 
+fn read_secret_input(prompt: &str) -> Result<String> {
+    let input = read_line(prompt)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    if trimmed == ":clipboard" {
+        return read_from_clipboard();
+    }
+
+    if let Some(path) = trimmed.strip_prefix('@') {
+        return read_from_file_path(path);
+    }
+
+    Ok(input)
+}
+
+fn read_from_clipboard() -> Result<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("pbpaste").output()?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("pbpaste failed"));
+        }
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(anyhow::anyhow!(
+            ":clipboard is currently only implemented on macOS"
+        ))
+    }
+}
+
+fn read_from_file_path(path: &str) -> Result<String> {
+    let expanded = if let Some(rest) = path.strip_prefix("~/") {
+        dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(rest)
+    } else {
+        std::path::PathBuf::from(path)
+    };
+
+    let content = std::fs::read_to_string(&expanded)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", expanded.display()))?;
+    Ok(content.trim().to_string())
+}
+
 fn cli_env_for_token(provider_id: &str, token: &str) -> std::collections::HashMap<String, String> {
     let mut env = std::collections::HashMap::new();
     let is_api_key = looks_like_api_key(token);
@@ -526,8 +681,10 @@ fn cli_env_for_token(provider_id: &str, token: &str) -> std::collections::HashMa
                 // Keep both for compatibility across Codex versions/configs.
                 env.insert("OPENAI_API_KEY".to_string(), token.to_string());
                 env.insert("CODEX_API_KEY".to_string(), token.to_string());
+            } else if let Some(codex_env) = codex_cli_env_from_token(token) {
+                env.extend(codex_env);
             } else {
-                // ChatGPT/browser auth tokens generally work through CODEX_API_KEY.
+                // Fallback for older opaque Codex auth token flows.
                 env.insert("CODEX_API_KEY".to_string(), token.to_string());
             }
         }
@@ -539,6 +696,92 @@ fn cli_env_for_token(provider_id: &str, token: &str) -> std::collections::HashMa
     }
 
     env
+}
+
+fn codex_cli_env_from_token(token: &str) -> Option<std::collections::HashMap<String, String>> {
+    let raw = token.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    if raw.starts_with('{') {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(raw) {
+            if let Some(map) = codex_env_from_auth_json(&json) {
+                return Some(map);
+            }
+        }
+    }
+
+    if looks_like_jwt(raw) {
+        let mut env = std::collections::HashMap::new();
+        env.insert("CODEX_AUTH_MODE".to_string(), "chatgpt".to_string());
+        if jwt_looks_like_access_token(raw) {
+            env.insert("CODEX_ACCESS_TOKEN".to_string(), raw.to_string());
+        } else {
+            env.insert("CODEX_ID_TOKEN".to_string(), raw.to_string());
+        }
+        return Some(env);
+    }
+
+    None
+}
+
+fn codex_env_from_auth_json(
+    json: &serde_json::Value,
+) -> Option<std::collections::HashMap<String, String>> {
+    let auth_mode = json.get("auth_mode").and_then(|v| v.as_str())?;
+    let tokens = json.get("tokens")?.as_object()?;
+
+    let mut env = std::collections::HashMap::new();
+    env.insert("CODEX_AUTH_MODE".to_string(), auth_mode.to_string());
+
+    for (json_key, env_key) in [
+        ("access_token", "CODEX_ACCESS_TOKEN"),
+        ("id_token", "CODEX_ID_TOKEN"),
+        ("refresh_token", "CODEX_REFRESH_TOKEN"),
+        ("account_id", "CODEX_ACCOUNT_ID"),
+    ] {
+        if let Some(value) = tokens.get(json_key).and_then(|v| v.as_str()) {
+            if !value.trim().is_empty() {
+                env.insert(env_key.to_string(), value.to_string());
+            }
+        }
+    }
+
+    if env.len() > 1 { Some(env) } else { None }
+}
+
+fn looks_like_jwt(token: &str) -> bool {
+    token.split('.').count() == 3 && token.starts_with("eyJ")
+}
+
+fn jwt_looks_like_access_token(token: &str) -> bool {
+    let Some(payload_b64) = token.split('.').nth(1) else {
+        return false;
+    };
+    let mut payload = payload_b64.replace('-', "+").replace('_', "/");
+    while payload.len() % 4 != 0 {
+        payload.push('=');
+    }
+
+    let Ok(bytes) = base64::decode(payload) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+
+    json.get("aud")
+        .and_then(|v| v.as_array())
+        .map(|aud| {
+            aud.iter().any(|entry| {
+                entry
+                    .as_str()
+                    .map(|s| s.contains("api.openai.com/v1"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn looks_like_api_key(token: &str) -> bool {
