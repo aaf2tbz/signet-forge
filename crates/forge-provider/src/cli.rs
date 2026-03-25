@@ -54,12 +54,13 @@ impl CliProvider {
                 let mut args = vec![
                     "exec".to_string(),
                     "--json".to_string(),
+                    "--skip-git-repo-check".to_string(),
                 ];
                 if opts.bypass {
                     args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
                 } else {
-                    args.push("--sandbox".to_string());
-                    args.push("read-only".to_string());
+                    // full-auto avoids interactive approval prompts
+                    args.push("--full-auto".to_string());
                 }
                 if !self.model.is_empty() {
                     args.push("--model".to_string());
