@@ -51,6 +51,9 @@ impl<'a> Widget for ChatView<'a> {
         let t = self.theme;
         let mut lines: Vec<Line> = Vec::new();
 
+        // Top padding — gap between status bar and chat content
+        lines.push(Line::from(""));
+
         // Welcome message if empty
         if self.entries.is_empty() && self.streaming_text.is_empty() {
             lines.push(Line::from(""));
@@ -211,6 +214,10 @@ impl<'a> Widget for ChatView<'a> {
                 )));
             }
         }
+
+        // Bottom padding — breathing room between content and input box
+        lines.push(Line::from(""));
+        lines.push(Line::from(""));
 
         // Estimate total wrapped lines for scroll calculation.
         // Word-wrap (Wrap { trim: false }) can produce more lines than char-level
