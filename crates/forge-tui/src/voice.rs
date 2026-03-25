@@ -225,13 +225,6 @@ pub fn transcribe(
         .full(params, &audio)
         .map_err(|e| format!("Transcribe: {e}"))?;
 
-    // Restore stdout + stderr now that whisper is done
-    #[cfg(unix)]
-    unsafe {
-        libc::dup2(stdout_guard, 1); libc::close(stdout_guard);
-        libc::dup2(stderr_guard, 2); libc::close(stderr_guard);
-    }
-
     let mut text = String::new();
     let n = state
         .full_n_segments()
@@ -240,6 +233,18 @@ pub fn transcribe(
         if let Ok(seg) = state.full_get_segment_text(i) {
             text.push_str(&seg);
         }
+    }
+
+    // Drop whisper state and context BEFORE restoring stdout/stderr.
+    // Metal cleanup (ggml_metal_free) logs on drop, so keep fd suppressed.
+    drop(state);
+    drop(_ctx);
+
+    // NOW restore stdout + stderr
+    #[cfg(unix)]
+    unsafe {
+        libc::dup2(stdout_guard, 1); libc::close(stdout_guard);
+        libc::dup2(stderr_guard, 2); libc::close(stderr_guard);
     }
 
     Ok(text.trim().to_string())
