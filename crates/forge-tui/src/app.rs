@@ -784,6 +784,7 @@ impl App {
             scroll_offset: self.scroll_offset,
             activity_line,
             agent_name: &self.agent_name,
+            total_memories: self.total_memories,
             theme: &self.theme,
         };
         chat.render(chunks[1], frame.buffer_mut());

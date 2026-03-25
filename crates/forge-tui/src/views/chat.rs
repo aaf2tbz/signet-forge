@@ -44,6 +44,8 @@ pub struct ChatView<'a> {
     pub activity_line: Option<String>,
     /// Agent display name from IDENTITY.md
     pub agent_name: &'a str,
+    /// Total memories in Signet (for welcome screen readout)
+    pub total_memories: usize,
     /// Active color theme
     pub theme: &'a Theme,
 }
@@ -72,42 +74,68 @@ impl<'a> Widget for ChatView<'a> {
                 lines.push(Line::from(""));
             }
 
-            // The anvil — forge's mark
+            // The embers — Forge's geometric heartbeat
             lines.push(Line::from(Span::styled(
-                center("⚒"),
-                Style::default().fg(t.accent),
+                center("◇  ◈  ◆  ◈  ◇"),
+                Style::default().fg(t.spinner),
             )));
+
             lines.push(Line::from(""));
 
-            // Agent name — big and bold
-            let name = self.agent_name;
+            // FORGE — spaced, heavy
             lines.push(Line::from(Span::styled(
-                center(name),
+                center("F O R G E"),
                 Style::default().fg(t.fg_bright).add_modifier(Modifier::BOLD),
             )));
 
-            // Subtle tagline
+            lines.push(Line::from(""));
+
+            // Your agent — the soul of this session
+            let name = self.agent_name;
             lines.push(Line::from(Span::styled(
-                center("forged by Signet"),
+                center(name),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            )));
+
+            lines.push(Line::from(""));
+
+            // The readout — what's loaded, what's alive
+            let rule_width = 36.min(w.saturating_sub(4));
+            let rule = "━".repeat(rule_width);
+            lines.push(Line::from(Span::styled(
+                center(&rule),
+                Style::default().fg(t.border),
+            )));
+            lines.push(Line::from(""));
+
+            // Show the forge's state — memories, model, connection
+            let mem_line = if self.total_memories > 0 {
+                format!("▸ {} memories loaded", self.total_memories)
+            } else {
+                "▸ memory ready".to_string()
+            };
+            lines.push(Line::from(Span::styled(
+                center(&mem_line),
+                Style::default().fg(t.muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                center("▸ identity forged · soul intact"),
                 Style::default().fg(t.muted),
             )));
 
             lines.push(Line::from(""));
-            lines.push(Line::from(""));
 
-            // Separator dots
-            let dots = "· · ·";
             lines.push(Line::from(Span::styled(
-                center(dots),
+                center(&rule),
                 Style::default().fg(t.border),
             )));
 
             lines.push(Line::from(""));
 
-            let hint = "speak or type — I'm here";
+            // The invitation — not generic, alive
             lines.push(Line::from(Span::styled(
-                center(hint),
-                Style::default().fg(t.muted),
+                center("the fire's lit."),
+                Style::default().fg(t.spinner),
             )));
         }
 
