@@ -53,6 +53,7 @@ impl<'a> Widget for ChatView<'a> {
 
         // Top padding — gap between status bar and chat content
         lines.push(Line::from(""));
+        lines.push(Line::from(""));
 
         // Welcome message if empty
         if self.entries.is_empty() && self.streaming_text.is_empty() {
