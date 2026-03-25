@@ -76,3 +76,20 @@ pub fn selected_marker(theme: &Theme) -> Style {
         .bg(theme.selected_bg)
         .add_modifier(Modifier::BOLD)
 }
+
+
+pub fn visible_window(total: usize, selected: usize, capacity: usize) -> (usize, usize) {
+    if capacity == 0 || total == 0 {
+        return (0, 0);
+    }
+    if total <= capacity {
+        return (0, total);
+    }
+    let half = capacity / 2;
+    let mut start = selected.saturating_sub(half);
+    if start + capacity > total {
+        start = total.saturating_sub(capacity);
+    }
+    let end = (start + capacity).min(total);
+    (start, end)
+}

@@ -333,8 +333,17 @@ impl ModelPicker {
         ]));
         lines.push(Line::from(""));
 
-        // Model list
-        for (i, model) in filtered.iter().enumerate() {
+        let list_capacity = dialog_area.height.saturating_sub(6) as usize;
+        let (start, end) = chrome::visible_window(filtered.len(), self.selected, list_capacity);
+
+        if start > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  ↑ {} more", start),
+                Style::default().fg(theme.muted),
+            )));
+        }
+
+        for (i, model) in filtered.iter().enumerate().skip(start).take(end.saturating_sub(start)) {
             let is_selected = i == self.selected;
             let style = if is_selected {
                 chrome::selected_primary(theme)
@@ -370,10 +379,16 @@ impl ModelPicker {
             )));
         }
 
-        // Footer
+        if end < filtered.len() {
+            lines.push(Line::from(Span::styled(
+                format!("  ↓ {} more", filtered.len() - end),
+                Style::default().fg(theme.muted),
+            )));
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "  ↑↓ navigate  Enter select  Esc cancel",
+            format!("  ↑↓ navigate  Enter select  Esc cancel   {}/{}", self.selected.saturating_add(1).min(filtered.len()), filtered.len()),
             Style::default().fg(theme.muted),
         )));
 

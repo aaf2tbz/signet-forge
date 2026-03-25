@@ -273,7 +273,15 @@ impl CommandPicker {
         lines.push(Line::from(""));
 
         let filtered = self.filtered();
-        for (i, cmd) in filtered.iter().enumerate() {
+        let list_capacity = popup.height.saturating_sub(6) as usize;
+        let (start, end) = chrome::visible_window(filtered.len(), self.selected, list_capacity);
+        if start > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  ↑ {} more", start),
+                Style::default().fg(theme.muted),
+            )));
+        }
+        for (i, cmd) in filtered.iter().enumerate().skip(start).take(end.saturating_sub(start)) {
             let is_selected = i == self.selected;
             let marker = if is_selected { "▸" } else { " " };
 
@@ -285,7 +293,7 @@ impl CommandPicker {
                     ),
                     Span::styled(
                         format!("{:<24}", cmd.label),
-                        chrome::selected_marker(theme),
+                        chrome::selected_primary(theme),
                     ),
                     Span::styled(
                         cmd.description.clone(),
@@ -308,9 +316,16 @@ impl CommandPicker {
             )));
         }
 
+        if end < filtered.len() {
+            lines.push(Line::from(Span::styled(
+                format!("  ↓ {} more", filtered.len() - end),
+                Style::default().fg(theme.muted),
+            )));
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            " ↑/↓ navigate  Enter run  Esc close",
+            format!(" ↑/↓ navigate  Enter run  Esc close   {}/{}", self.selected.saturating_add(1).min(filtered.len()), filtered.len()),
             Style::default().fg(theme.muted),
         )));
 
