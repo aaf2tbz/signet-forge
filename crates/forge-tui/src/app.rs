@@ -888,8 +888,12 @@ impl App {
                 // Always reset scroll to bottom when user submits
                 self.scroll_offset = 0;
 
-                // Check for slash commands before sending to LLM
-                if input.starts_with('/') {
+                // Check for slash commands — must start with / followed by a letter,
+                // and the first word must not contain another / (which would be a file path)
+                let is_command = input.starts_with('/')
+                    && input.chars().nth(1).is_some_and(|c| c.is_ascii_lowercase())
+                    && !input[1..].split_whitespace().next().unwrap_or("").contains('/');
+                if is_command {
                     self.handle_slash_command(&input).await;
                 } else {
                     self.processing = true;
