@@ -1,4 +1,5 @@
 use anyhow::Result;
+use base64::Engine;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind},
@@ -764,7 +765,7 @@ fn jwt_looks_like_access_token(token: &str) -> bool {
         payload.push('=');
     }
 
-    let Ok(bytes) = base64::decode(payload) else {
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(payload) else {
         return false;
     };
     let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
