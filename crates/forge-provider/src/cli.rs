@@ -62,13 +62,8 @@ impl CliProvider {
                     // full-auto avoids interactive approval prompts
                     args.push("--full-auto".to_string());
                 }
-                // Don't pass --model to Codex — it manages its own model
-                // selection based on account type (API key vs ChatGPT).
-                // Passing model names often fails with ChatGPT accounts.
-                if opts.effort != crate::ReasoningEffort::Medium {
-                    args.push("--reasoning-effort".to_string());
-                    args.push(opts.effort.as_str().to_string());
-                }
+                // Don't pass --model or --reasoning-effort to Codex — it
+                // manages its own model selection and doesn't accept either flag.
                 args.push(prompt.to_string());
                 args
             }
