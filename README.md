@@ -267,10 +267,18 @@ All rebindable via `Ctrl+B` (editor overlay) or `~/.config/forge/keybinds.json`.
 
 Type `/` and press `Tab` to complete. Arguments for `/effort`, `/theme`, `/model` show predictive options.
 
+Installed Signet skills now appear automatically as `/skill-name` commands in Forge. Installed Signet MCP servers/tools also show up automatically as slash commands, using:
+
+- `/mcp` for MCP help
+- `/mcp-<server-id> <tool> [json args]` for server-scoped calls
+- `/mcp-<server-id>-<tool-name> [json args]` for direct tool commands
+
 | Command | What it does |
 |---|---|
 | `/recall <query>` | Search memories |
 | `/remember <text>` | Store a memory |
+| `/<skill-name> [prompt]` | Run an installed Signet skill |
+| `/mcp` | Show installed MCP slash command usage |
 | `/model` | Open model picker |
 | `/auth` | Show provider auth setup instructions |
 | `/effort <level>` | Reasoning effort (low/medium/high) — persists |

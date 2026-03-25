@@ -8,7 +8,7 @@ use crate::views::keybind_editor::KeybindEditor;
 use crate::views::dashboard_panel::DashboardPanel;
 use crate::views::model_picker::ModelPicker;
 use crate::views::session_browser::SessionBrowser;
-use crate::views::signet_commands::{self, CommandPicker};
+use crate::views::signet_commands::{self, CommandKind as SlashCommandKind, CommandPicker};
 use crate::voice;
 use crate::widgets::status_bar::StatusBar;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -198,6 +198,14 @@ pub struct App {
     forge_usage: Option<ForgeUsage>,
     /// Loaded skills
     skills: Vec<forge_signet::Skill>,
+    /// Dynamic slash command registry
+    signet_commands: Vec<signet_commands::SignetCommand>,
+    /// Installed Signet MCP servers exposed as slash namespaces
+    mcp_servers: Vec<signet_commands::McpServerCommand>,
+    /// Installed Signet MCP tools exposed as slash commands
+    mcp_tools: Vec<signet_commands::McpToolCommand>,
+    /// Active one-shot skill for next prompt
+    pending_skill: Option<(String, String)>,
     /// Signet client for API key resolution on model switch
     signet_client: Option<SignetClient>,
     /// Shared permissions manager
@@ -274,6 +282,7 @@ impl App {
 
     async fn refresh_connected_models(&mut self) {
         self.detected_clis = forge_provider::cli::detect_cli_tools().await;
+        self.skills = forge_signet::skills::load_skills();
 
         if let Some(client) = &self.signet_client {
             let _ = refresh_daemon_model_registry(client).await;
@@ -307,7 +316,75 @@ impl App {
                 .into_iter()
                 .map(|p| p.provider)
                 .collect();
+
+            self.mcp_servers = client
+                .get("/api/marketplace/mcp")
+                .await
+                .ok()
+                .and_then(|resp| resp.get("servers").and_then(|v| v.as_array()).cloned())
+                .map(|servers| {
+                    servers
+                        .iter()
+                        .filter_map(|server| {
+                            let enabled = server
+                                .get("enabled")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(true);
+                            if !enabled {
+                                return None;
+                            }
+                            Some(signet_commands::McpServerCommand {
+                                server_id: server.get("id")?.as_str()?.to_string(),
+                                server_name: server
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("MCP Server")
+                                    .to_string(),
+                                description: server
+                                    .get("description")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            self.mcp_tools = client
+                .get("/api/marketplace/mcp/tools?refresh=1")
+                .await
+                .ok()
+                .and_then(|resp| resp.get("tools").and_then(|v| v.as_array()).cloned())
+                .map(|tools| {
+                    tools
+                        .iter()
+                        .filter_map(|tool| {
+                            Some(signet_commands::McpToolCommand {
+                                server_id: tool.get("serverId")?.as_str()?.to_string(),
+                                server_name: tool
+                                    .get("serverName")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("MCP Server")
+                                    .to_string(),
+                                tool_name: tool.get("toolName")?.as_str()?.to_string(),
+                                description: tool
+                                    .get("description")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
         }
+
+        self.signet_commands = signet_commands::commands_with_dynamic(
+            &self.skills,
+            &self.mcp_servers,
+            &self.mcp_tools,
+        );
     }
 
     fn open_model_picker(&mut self) {
@@ -489,6 +566,10 @@ impl App {
             dashboard_panel: None,
             forge_usage: None,
             skills,
+            signet_commands: Vec::new(),
+            mcp_servers: Vec::new(),
+            mcp_tools: Vec::new(),
+            pending_skill: None,
             signet_client,
             permissions,
             system_prompt,
@@ -933,7 +1014,13 @@ impl App {
 
         // Slash command autocomplete dropdown
         if self.input.starts_with('/') && self.input.len() < 30 {
-            signet_commands::render_autocomplete(&self.input, chunks[2], frame.buffer_mut(), &self.theme);
+            signet_commands::render_autocomplete(
+                &self.input,
+                &self.signet_commands,
+                chunks[2],
+                frame.buffer_mut(),
+                &self.theme,
+            );
         }
 
         // Position cursor — always visible, accounts for input scroll
@@ -1174,12 +1261,21 @@ impl App {
                 } else {
                     self.processing = true;
                     self.processing_phase = ProcessingPhase::RecallingMemories;
+                    let final_input = if let Some((skill_name, skill_content)) = self.pending_skill.take() {
+                        self.entries.push(ChatEntry::Status(format!(
+                            "Applying skill /{} to this prompt.",
+                            skill_name
+                        )));
+                        format!("<skill name=\"{skill_name}\">\n{skill_content}\n</skill>\n\n{input}")
+                    } else {
+                        input.clone()
+                    };
                     self.entries.push(ChatEntry::UserMessage(input.clone()));
 
                     let agent = Arc::clone(&self.agent);
                     let session = Arc::clone(&self.session);
                     self.agent_task = Some(tokio::spawn(async move {
-                        agent.process_message(&session, &input).await;
+                        agent.process_message(&session, &final_input).await;
                     }));
                 }
             }
@@ -1211,7 +1307,9 @@ impl App {
             }
             Action::TabComplete => {
                 if self.input.starts_with('/') {
-                    if let Some(completed) = signet_commands::tab_complete(&self.input) {
+                    if let Some(completed) =
+                        signet_commands::tab_complete(&self.input, &self.signet_commands)
+                    {
                         self.input = completed;
                         self.cursor = self.input_char_len();
                     }
@@ -1271,7 +1369,7 @@ impl App {
                 self.scroll_offset = 0;
             }
             Action::SignetCommands if !self.processing => {
-                self.command_picker = Some(CommandPicker::new());
+                self.command_picker = Some(CommandPicker::new(self.signet_commands.clone()));
             }
             Action::DashboardNav if !self.processing => {
                 self.dashboard_nav = Some(DashboardNav::new());
@@ -1632,13 +1730,13 @@ impl App {
         }
 
         // Match against registered commands
-        let commands = signet_commands::all_commands();
+        let commands = self.signet_commands.clone();
         if let Some(cmd) = commands.iter().find(|c| c.key == cmd_name) {
             match &cmd.kind {
-                signet_commands::CommandKind::Internal(action) => {
-                    match *action {
+                SlashCommandKind::Internal(action) => {
+                    match action.as_str() {
                         "help" => {
-                            let help = signet_commands::help_text();
+                            let help = signet_commands::help_text(&self.signet_commands);
                             self.entries.push(ChatEntry::Ephemeral(help));
                         }
                         "clear" => {
@@ -1788,6 +1886,29 @@ impl App {
                         "forge-usage" => {
                             self.forge_usage = Some(ForgeUsage::new());
                         }
+                        "mcp-help" => {
+                            let mut help = String::from("◆ MCP Commands\n\n");
+                            if self.mcp_servers.is_empty() {
+                                help.push_str("  No installed MCP servers detected.\n");
+                            } else {
+                                help.push_str("  Server namespaces:\n");
+                                for server in &self.mcp_servers {
+                                    help.push_str(&format!(
+                                        "    /mcp-{} <tool> [json args]  {}\n",
+                                        server.server_id, server.server_name
+                                    ));
+                                }
+                                help.push_str("\n  Direct tool commands:\n");
+                                for tool in &self.mcp_tools {
+                                    help.push_str(&format!(
+                                        "    /mcp-{}-{} [json args]\n",
+                                        tool.server_id,
+                                        tool.tool_name.replace(['/', ' '], "-")
+                                    ));
+                                }
+                            }
+                            self.entries.push(ChatEntry::Ephemeral(help));
+                        }
                         "import-claude" => {
                             self.entries.push(ChatEntry::Status(
                                 "Importing sessions from Claude Code...".to_string(),
@@ -1822,6 +1943,69 @@ impl App {
                         _ => {}
                     }
                 }
+                SlashCommandKind::Skill { name, content } => {
+                    if args.is_empty() {
+                        self.pending_skill = Some((name.clone(), content.clone()));
+                        self.entries.push(ChatEntry::Status(format!(
+                            "Skill /{} activated — your next prompt will run with this skill.",
+                            name
+                        )));
+                    } else {
+                        self.processing = true;
+                        self.processing_phase = ProcessingPhase::RecallingMemories;
+                        self.entries.push(ChatEntry::UserMessage(args.to_string()));
+                        let final_input =
+                            format!("<skill name=\"{name}\">\n{content}\n</skill>\n\n{args}");
+                        let agent = Arc::clone(&self.agent);
+                        let session = Arc::clone(&self.session);
+                        self.agent_task = Some(tokio::spawn(async move {
+                            agent.process_message(&session, &final_input).await;
+                        }));
+                    }
+                }
+                SlashCommandKind::McpServer {
+                    server_id,
+                    server_name,
+                } => {
+                    if args.is_empty() {
+                        let available: Vec<String> = self
+                            .mcp_tools
+                            .iter()
+                            .filter(|t| t.server_id == *server_id)
+                            .map(|t| t.tool_name.clone())
+                            .collect();
+                        let usage = if available.is_empty() {
+                            format!(
+                                "No tools found for MCP server {}. Try refreshing or check Signet MCP install state.",
+                                server_name
+                            )
+                        } else {
+                            format!(
+                                "MCP server {} tools:\n{}",
+                                server_name,
+                                available
+                                    .iter()
+                                    .map(|t| format!("  - {t}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        };
+                        self.entries.push(ChatEntry::Ephemeral(usage));
+                    } else {
+                        let (tool_name, raw_args) = match args.split_once(' ') {
+                            Some((tool, rest)) => (tool.trim(), rest.trim()),
+                            None => (args.trim(), ""),
+                        };
+                        self.run_mcp_tool(server_id, tool_name, raw_args).await;
+                    }
+                }
+                SlashCommandKind::McpTool {
+                    server_id,
+                    tool_name,
+                    ..
+                } => {
+                    self.run_mcp_tool(server_id, tool_name, args).await;
+                }
                 _ => {
                     self.execute_signet_command(cmd).await;
                 }
@@ -1839,10 +2023,11 @@ impl App {
             .push(ChatEntry::Status(format!("◇ Running {}...", cmd.label)));
 
         match &cmd.kind {
-            signet_commands::CommandKind::Cli(args) => {
-                self.run_signet_cli(args).await;
+            SlashCommandKind::Cli(args) => {
+                let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+                self.run_signet_cli(&argv).await;
             }
-            signet_commands::CommandKind::ApiGet(path) => {
+            SlashCommandKind::ApiGet(path) => {
                 if let Some(client) = &self.signet_client {
                     match client.get(path).await {
                         Ok(resp) => {
@@ -1862,7 +2047,7 @@ impl App {
                     ));
                 }
             }
-            signet_commands::CommandKind::ApiPost(path) => {
+            SlashCommandKind::ApiPost(path) => {
                 if let Some(client) = &self.signet_client {
                     match client
                         .post(path, &serde_json::json!({}))
@@ -1886,8 +2071,55 @@ impl App {
                     ));
                 }
             }
-            signet_commands::CommandKind::Internal(_) => {
-                // Internal commands are handled in handle_slash_command directly
+            SlashCommandKind::Internal(_)
+            | SlashCommandKind::Skill { .. }
+            | SlashCommandKind::McpServer { .. }
+            | SlashCommandKind::McpTool { .. } => {}
+        }
+    }
+
+    async fn run_mcp_tool(&mut self, server_id: &str, tool_name: &str, raw_args: &str) {
+        let args = if raw_args.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            match serde_json::from_str::<serde_json::Value>(raw_args.trim()) {
+                Ok(value) => value,
+                Err(e) => {
+                    self.entries.push(ChatEntry::Error(format!(
+                        "Invalid JSON args for MCP tool {}: {}",
+                        tool_name, e
+                    )));
+                    return;
+                }
+            }
+        };
+
+        let Some(client) = &self.signet_client else {
+            self.entries
+                .push(ChatEntry::Error("Signet daemon not connected".to_string()));
+            return;
+        };
+
+        self.entries.push(ChatEntry::Status(format!(
+            "◇ Running MCP tool {} on {}...",
+            tool_name, server_id
+        )));
+
+        let body = serde_json::json!({
+            "serverId": server_id,
+            "toolName": tool_name,
+            "args": args,
+        });
+
+        match client.post("/api/marketplace/mcp/call", &body).await {
+            Ok(resp) => {
+                let formatted = serde_json::to_string_pretty(&resp).unwrap_or_default();
+                self.entries
+                    .push(ChatEntry::Ephemeral(format!("```json\n{formatted}\n```")));
+            }
+            Err(e) => {
+                self.entries
+                    .push(ChatEntry::Error(format!("MCP tool call failed: {e}")));
             }
         }
     }
@@ -2003,15 +2235,12 @@ impl App {
                 }
                 _ => {}
             },
-            PaletteCommandKind::Skill(_content) => {
-                // Inject skill content as a system message for the next prompt
+            PaletteCommandKind::Skill(content) => {
                 self.entries.push(ChatEntry::Status(format!(
-                    "Skill /{} activated — type your prompt.",
+                    "Skill /{} activated — your next prompt will run with this skill.",
                     cmd.name
                 )));
-                // Prepend skill content to input for next submission
-                self.input = format!("[Skill: {}] ", cmd.name);
-                self.cursor = self.input_char_len();
+                self.pending_skill = Some((cmd.name.clone(), content.clone()));
             }
         }
     }

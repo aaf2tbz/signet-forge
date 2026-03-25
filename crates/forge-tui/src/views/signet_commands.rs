@@ -7,255 +7,179 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
+#[derive(Debug, Clone)]
+pub struct McpServerCommand {
+    pub server_id: String,
+    pub server_name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct McpToolCommand {
+    pub server_id: String,
+    pub server_name: String,
+    pub tool_name: String,
+    pub description: String,
+}
+
 /// A Signet diagnostic/management command
 #[derive(Debug, Clone)]
 pub struct SignetCommand {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub description: &'static str,
+    pub key: String,
+    pub label: String,
+    pub description: String,
     pub kind: CommandKind,
 }
 
 #[derive(Debug, Clone)]
 pub enum CommandKind {
-    /// Run a CLI command (signet ...)
-    Cli(&'static [&'static str]),
-    /// Call a daemon API endpoint
-    ApiGet(&'static str),
-    ApiPost(&'static str),
-    /// Handled internally by the TUI
-    Internal(&'static str),
+    Cli(Vec<String>),
+    ApiGet(String),
+    ApiPost(String),
+    Internal(String),
+    Skill {
+        name: String,
+        content: String,
+    },
+    McpServer {
+        server_id: String,
+        server_name: String,
+    },
+    McpTool {
+        server_id: String,
+        server_name: String,
+        tool_name: String,
+    },
 }
 
-/// All available Signet commands
-pub fn all_commands() -> Vec<SignetCommand> {
+fn cmd(key: &str, label: &str, description: &str, kind: CommandKind) -> SignetCommand {
+    SignetCommand {
+        key: key.to_string(),
+        label: label.to_string(),
+        description: description.to_string(),
+        kind,
+    }
+}
+
+pub fn built_in_commands() -> Vec<SignetCommand> {
     vec![
-        // Basic / built-in commands
-        SignetCommand {
-            key: "help",
-            label: "/help",
-            description: "Show all available commands",
-            kind: CommandKind::Internal("help"),
-        },
-        SignetCommand {
-            key: "signet-help",
-            label: "/signet-help",
-            description: "Show all Signet commands",
-            kind: CommandKind::Internal("help"),
-        },
-        SignetCommand {
-            key: "clear",
-            label: "/clear",
-            description: "Clear the chat history",
-            kind: CommandKind::Internal("clear"),
-        },
-        SignetCommand {
-            key: "model",
-            label: "/model",
-            description: "Open model picker (same as Ctrl+O)",
-            kind: CommandKind::Internal("model"),
-        },
-        SignetCommand {
-            key: "compact",
-            label: "/compact",
-            description: "Force context compaction",
-            kind: CommandKind::Internal("compact"),
-        },
-        SignetCommand {
-            key: "resume",
-            label: "/resume",
-            description: "Resume the last saved session",
-            kind: CommandKind::Internal("resume"),
-        },
-        SignetCommand {
-            key: "import-claude",
-            label: "/import-claude",
-            description: "Import conversation history from Claude Code",
-            kind: CommandKind::Internal("import-claude"),
-        },
-        SignetCommand {
-            key: "dashboard",
-            label: "/dashboard",
-            description: "Open Signet dashboard in browser",
-            kind: CommandKind::Internal("dashboard"),
-        },
-        SignetCommand {
-            key: "theme",
-            label: "/theme <name>",
-            description: "Switch theme (signet-dark, signet-light, midnight, amber)",
-            kind: CommandKind::Internal("theme"),
-        },
-        SignetCommand {
-            key: "auth",
-            label: "/auth",
-            description: "Show provider auth setup instructions",
-            kind: CommandKind::Internal("auth"),
-        },
-        SignetCommand {
-            key: "effort",
-            label: "/effort <level>",
-            description: "Set reasoning effort (low, medium, high)",
-            kind: CommandKind::Internal("effort"),
-        },
-        SignetCommand {
-            key: "forge-bypass",
-            label: "/forge-bypass",
-            description: "Toggle CLI permission bypass (skip all approval prompts)",
-            kind: CommandKind::Internal("forge-bypass"),
-        },
-        SignetCommand {
-            key: "keybinds",
-            label: "/keybinds",
-            description: "Show current key bindings (edit ~/.config/forge/keybinds.json)",
-            kind: CommandKind::Internal("keybinds"),
-        },
-        SignetCommand {
-            key: "extraction-model",
-            label: "/extraction-model <model>",
-            description: "View or change the Signet extraction pipeline model",
-            kind: CommandKind::Internal("extraction-model"),
-        },
-        SignetCommand {
-            key: "agent",
-            label: "/agent",
-            description: "Show current agent identity and ID",
-            kind: CommandKind::Internal("agent"),
-        },
-        SignetCommand {
-            key: "signet-save-agent",
-            label: "/signet-save-agent <path>",
-            description: "Export your entire Signet agent to a zip file",
-            kind: CommandKind::Internal("signet-save-agent"),
-        },
-        SignetCommand {
-            key: "forge-usage",
-            label: "/forge-usage",
-            description: "Show token usage across Codex and Claude Code",
-            kind: CommandKind::Internal("forge-usage"),
-        },
-        // Status & Diagnostics
-        SignetCommand {
-            key: "status",
-            label: "/status",
-            description: "Show agent and daemon status",
-            kind: CommandKind::Cli(&["status"]),
-        },
-        SignetCommand {
-            key: "doctor",
-            label: "/doctor",
-            description: "Run health checks and suggest fixes",
-            kind: CommandKind::Cli(&["doctor"]),
-        },
-        SignetCommand {
-            key: "logs",
-            label: "/logs",
-            description: "View last 50 daemon log lines",
-            kind: CommandKind::Cli(&["daemon", "logs", "--lines", "50"]),
-        },
-        SignetCommand {
-            key: "health",
-            label: "/health",
-            description: "Full daemon health report",
-            kind: CommandKind::ApiGet("/health"),
-        },
-        SignetCommand {
-            key: "diagnostics",
-            label: "/diagnostics",
-            description: "Composite health score across all domains",
-            kind: CommandKind::ApiGet("/api/diagnostics"),
-        },
-        // Memory
-        SignetCommand {
-            key: "recall",
-            label: "/recall <query>",
-            description: "Search memories by query",
-            kind: CommandKind::Cli(&["recall"]),
-        },
-        SignetCommand {
-            key: "remember",
-            label: "/remember <text>",
-            description: "Store a new memory",
-            kind: CommandKind::Cli(&["remember"]),
-        },
-        SignetCommand {
-            key: "recall-test",
-            label: "/recall-test",
-            description: "Test memory search with a sample query",
-            kind: CommandKind::Cli(&["recall", "test", "query"]),
-        },
-        // Embeddings
-        SignetCommand {
-            key: "embed-audit",
-            label: "/embed-audit",
-            description: "Audit embedding coverage and health",
-            kind: CommandKind::Cli(&["embed", "audit"]),
-        },
-        SignetCommand {
-            key: "embed-backfill",
-            label: "/embed-backfill",
-            description: "Backfill missing embeddings",
-            kind: CommandKind::Cli(&["embed", "backfill"]),
-        },
-        // Skills & Secrets
-        SignetCommand {
-            key: "skill-list",
-            label: "/skill-list",
-            description: "List installed skills",
-            kind: CommandKind::Cli(&["skill", "list"]),
-        },
-        SignetCommand {
-            key: "secret-list",
-            label: "/secret-list",
-            description: "List configured secrets",
-            kind: CommandKind::Cli(&["secret", "list"]),
-        },
-        // Sync & Updates
-        SignetCommand {
-            key: "sync",
-            label: "/sync",
-            description: "Sync built-in templates and skills",
-            kind: CommandKind::Cli(&["sync"]),
-        },
-        // Daemon management
-        SignetCommand {
-            key: "daemon-restart",
-            label: "/daemon-restart",
-            description: "Restart the Signet daemon",
-            kind: CommandKind::Cli(&["daemon", "restart"]),
-        },
-        SignetCommand {
-            key: "daemon-stop",
-            label: "/daemon-stop",
-            description: "Stop the Signet daemon",
-            kind: CommandKind::Cli(&["daemon", "stop"]),
-        },
-        // Repair
-        SignetCommand {
-            key: "repair-requeue",
-            label: "/repair-requeue",
-            description: "Requeue dead extraction jobs",
-            kind: CommandKind::ApiPost("/api/repair/requeue-dead"),
-        },
-        SignetCommand {
-            key: "repair-leases",
-            label: "/repair-leases",
-            description: "Release stale job leases",
-            kind: CommandKind::ApiPost("/api/repair/release-leases"),
-        },
-        SignetCommand {
-            key: "repair-fts",
-            label: "/repair-fts",
-            description: "Check and repair FTS search index",
-            kind: CommandKind::ApiPost("/api/repair/check-fts"),
-        },
-        // Pipeline
-        SignetCommand {
-            key: "pipeline",
-            label: "/pipeline",
-            description: "Show extraction pipeline status",
-            kind: CommandKind::ApiGet("/api/pipeline/status"),
-        },
+        cmd("help", "/help", "Show all available commands", CommandKind::Internal("help".into())),
+        cmd("signet-help", "/signet-help", "Show all Signet commands", CommandKind::Internal("help".into())),
+        cmd("clear", "/clear", "Clear the chat history", CommandKind::Internal("clear".into())),
+        cmd("model", "/model", "Open model picker (same as Ctrl+O)", CommandKind::Internal("model".into())),
+        cmd("compact", "/compact", "Force context compaction", CommandKind::Internal("compact".into())),
+        cmd("resume", "/resume", "Resume the last saved session", CommandKind::Internal("resume".into())),
+        cmd(
+            "import-claude",
+            "/import-claude",
+            "Import conversation history from Claude Code",
+            CommandKind::Internal("import-claude".into()),
+        ),
+        cmd("dashboard", "/dashboard", "Open Signet dashboard in browser", CommandKind::Internal("dashboard".into())),
+        cmd("theme", "/theme <name>", "Switch theme (signet-dark, signet-light, midnight, amber)", CommandKind::Internal("theme".into())),
+        cmd("auth", "/auth", "Show provider auth setup instructions", CommandKind::Internal("auth".into())),
+        cmd("effort", "/effort <level>", "Set reasoning effort (low, medium, high)", CommandKind::Internal("effort".into())),
+        cmd("forge-bypass", "/forge-bypass", "Toggle CLI permission bypass (skip all approval prompts)", CommandKind::Internal("forge-bypass".into())),
+        cmd("keybinds", "/keybinds", "Show current key bindings (edit ~/.config/forge/keybinds.json)", CommandKind::Internal("keybinds".into())),
+        cmd("extraction-model", "/extraction-model <model>", "View or change the Signet extraction pipeline model", CommandKind::Internal("extraction-model".into())),
+        cmd("agent", "/agent", "Show current agent identity and ID", CommandKind::Internal("agent".into())),
+        cmd("signet-save-agent", "/signet-save-agent <path>", "Export your entire Signet agent to a zip file", CommandKind::Internal("signet-save-agent".into())),
+        cmd("forge-usage", "/forge-usage", "Show token usage across Codex and Claude Code", CommandKind::Internal("forge-usage".into())),
+        cmd("status", "/status", "Show agent and daemon status", CommandKind::Cli(vec!["status".into()])),
+        cmd("doctor", "/doctor", "Run health checks and suggest fixes", CommandKind::Cli(vec!["doctor".into()])),
+        cmd("logs", "/logs", "View last 50 daemon log lines", CommandKind::Cli(vec!["daemon".into(), "logs".into(), "--lines".into(), "50".into()])),
+        cmd("health", "/health", "Full daemon health report", CommandKind::ApiGet("/health".into())),
+        cmd("diagnostics", "/diagnostics", "Composite health score across all domains", CommandKind::ApiGet("/api/diagnostics".into())),
+        cmd("recall", "/recall <query>", "Search memories by query", CommandKind::Cli(vec!["recall".into()])),
+        cmd("remember", "/remember <text>", "Store a new memory", CommandKind::Cli(vec!["remember".into()])),
+        cmd("recall-test", "/recall-test", "Test memory search with a sample query", CommandKind::Cli(vec!["recall".into(), "test".into(), "query".into()])),
+        cmd("embed-audit", "/embed-audit", "Audit embedding coverage and health", CommandKind::Cli(vec!["embed".into(), "audit".into()])),
+        cmd("embed-backfill", "/embed-backfill", "Backfill missing embeddings", CommandKind::Cli(vec!["embed".into(), "backfill".into()])),
+        cmd("skill-list", "/skill-list", "List installed skills", CommandKind::Cli(vec!["skill".into(), "list".into()])),
+        cmd("secret-list", "/secret-list", "List configured secrets", CommandKind::Cli(vec!["secret".into(), "list".into()])),
+        cmd("sync", "/sync", "Sync built-in templates and skills", CommandKind::Cli(vec!["sync".into()])),
+        cmd("daemon-restart", "/daemon-restart", "Restart the Signet daemon", CommandKind::Cli(vec!["daemon".into(), "restart".into()])),
+        cmd("daemon-stop", "/daemon-stop", "Stop the Signet daemon", CommandKind::Cli(vec!["daemon".into(), "stop".into()])),
+        cmd("repair-requeue", "/repair-requeue", "Requeue dead extraction jobs", CommandKind::ApiPost("/api/repair/requeue-dead".into())),
+        cmd("repair-leases", "/repair-leases", "Release stale job leases", CommandKind::ApiPost("/api/repair/release-leases".into())),
+        cmd("repair-fts", "/repair-fts", "Check and repair FTS search index", CommandKind::ApiPost("/api/repair/check-fts".into())),
+        cmd("pipeline", "/pipeline", "Show extraction pipeline status", CommandKind::ApiGet("/api/pipeline/status".into())),
     ]
+}
+
+pub fn commands_with_dynamic(
+    skills: &[forge_signet::Skill],
+    mcp_servers: &[McpServerCommand],
+    mcp_tools: &[McpToolCommand],
+) -> Vec<SignetCommand> {
+    let mut commands = built_in_commands();
+
+    for skill in skills.iter().filter(|s| s.user_invocable) {
+        let label = if let Some(hint) = &skill.arg_hint {
+            format!("/{} {}", skill.name, hint)
+        } else {
+            format!("/{}", skill.name)
+        };
+        commands.push(SignetCommand {
+            key: skill.name.clone(),
+            label,
+            description: if skill.description.is_empty() {
+                "Run installed skill".to_string()
+            } else {
+                skill.description.clone()
+            },
+            kind: CommandKind::Skill {
+                name: skill.name.clone(),
+                content: skill.content.clone(),
+            },
+        });
+    }
+
+    commands.push(cmd(
+        "mcp",
+        "/mcp",
+        "List installed MCP slash commands and usage",
+        CommandKind::Internal("mcp-help".into()),
+    ));
+
+    for server in mcp_servers {
+        let key = format!("mcp-{}", server.server_id);
+        let label = format!("/{} <tool> [json args]", key);
+        commands.push(SignetCommand {
+            key,
+            label,
+            description: if server.description.is_empty() {
+                format!("Run tools from MCP server {}", server.server_name)
+            } else {
+                format!("{} [{}]", server.description, server.server_name)
+            },
+            kind: CommandKind::McpServer {
+                server_id: server.server_id.clone(),
+                server_name: server.server_name.clone(),
+            },
+        });
+    }
+
+    for tool in mcp_tools {
+        let key = format!("mcp-{}-{}", tool.server_id, tool.tool_name.replace(['/', ' '], "-"));
+        let label = format!("/{} [json args]", key);
+        commands.push(SignetCommand {
+            key,
+            label,
+            description: if tool.description.is_empty() {
+                format!("Run {} on {}", tool.tool_name, tool.server_name)
+            } else {
+                format!("{} [{}]", tool.description, tool.server_name)
+            },
+            kind: CommandKind::McpTool {
+                server_id: tool.server_id.clone(),
+                server_name: tool.server_name.clone(),
+                tool_name: tool.tool_name.clone(),
+            },
+        });
+    }
+
+    commands
 }
 
 /// Interactive command picker state
@@ -265,16 +189,10 @@ pub struct CommandPicker {
     pub filter: String,
 }
 
-impl Default for CommandPicker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CommandPicker {
-    pub fn new() -> Self {
+    pub fn new(commands: Vec<SignetCommand>) -> Self {
         Self {
-            commands: all_commands(),
+            commands,
             selected: 0,
             filter: String::new(),
         }
@@ -288,8 +206,8 @@ impl CommandPicker {
             self.commands
                 .iter()
                 .filter(|c| {
-                    c.key.contains(&query)
-                        || c.label.contains(&query)
+                    c.key.to_lowercase().contains(&query)
+                        || c.label.to_lowercase().contains(&query)
                         || c.description.to_lowercase().contains(&query)
                 })
                 .collect()
@@ -324,14 +242,12 @@ impl CommandPicker {
     }
 
     pub fn render_themed(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        // Center the overlay
         let width = 60.min(area.width.saturating_sub(4));
         let height = 22.min(area.height.saturating_sub(4));
         let x = area.x + (area.width.saturating_sub(width)) / 2;
         let y = area.y + (area.height.saturating_sub(height)) / 2;
         let popup = Rect::new(x, y, width, height);
 
-        // Clear background and fill with themed dialog bg
         Clear.render(popup, buf);
         for row in popup.y..popup.y + popup.height {
             for col in popup.x..popup.x + popup.width {
@@ -351,8 +267,6 @@ impl CommandPicker {
         block.render(popup, buf);
 
         let mut lines = Vec::new();
-
-        // Filter bar
         let filter_display = if self.filter.is_empty() {
             "  Type to filter...".to_string()
         } else {
@@ -364,7 +278,6 @@ impl CommandPicker {
         )));
         lines.push(Line::from(""));
 
-        // Command list
         let filtered = self.filtered();
         for (i, cmd) in filtered.iter().enumerate() {
             let is_selected = i == self.selected;
@@ -377,25 +290,19 @@ impl CommandPicker {
                         Style::default().fg(theme.selected_fg).bg(theme.selected_bg).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        format!("{:<20}", cmd.label),
+                        format!("{:<24}", cmd.label),
                         Style::default().fg(theme.selected_fg).bg(theme.selected_bg).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        cmd.description,
+                        cmd.description.clone(),
                         Style::default().fg(theme.selected_fg).bg(theme.selected_bg),
                     ),
                 ]));
             } else {
                 lines.push(Line::from(vec![
                     Span::raw(format!(" {marker} ")),
-                    Span::styled(
-                        format!("{:<20}", cmd.label),
-                        Style::default().fg(theme.fg),
-                    ),
-                    Span::styled(
-                        cmd.description,
-                        Style::default().fg(theme.muted),
-                    ),
+                    Span::styled(format!("{:<24}", cmd.label), Style::default().fg(theme.fg)),
+                    Span::styled(cmd.description.clone(), Style::default().fg(theme.muted)),
                 ]));
             }
         }
@@ -407,7 +314,6 @@ impl CommandPicker {
             )));
         }
 
-        // Footer
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             " ↑/↓ navigate  Enter run  Esc close",
@@ -419,67 +325,56 @@ impl CommandPicker {
     }
 }
 
-/// Generate help text for /signet-help
-pub fn help_text() -> String {
+pub fn help_text(commands: &[SignetCommand]) -> String {
     let mut text = String::new();
     text.push_str("◆ Signet Commands\n\n");
-    text.push_str("  Usage:\n");
-    for cmd in all_commands()
+
+    let sections = [
+        ("Core", vec!["help", "signet-help", "clear", "model", "compact", "resume", "dashboard", "theme", "auth", "effort"]),
+        ("Status & Diagnostics", vec!["status", "doctor", "logs", "health", "diagnostics"]),
+        ("Memory", vec!["recall", "remember", "recall-test"]),
+        ("Embeddings", vec!["embed-audit", "embed-backfill"]),
+        ("Management", vec!["skill-list", "secret-list", "sync", "pipeline", "agent", "signet-save-agent", "forge-usage"]),
+        ("Daemon", vec!["daemon-restart", "daemon-stop"]),
+        ("Repair", vec!["repair-requeue", "repair-leases", "repair-fts"]),
+    ];
+
+    for (title, keys) in sections {
+        text.push_str(&format!("  {title}:\n"));
+        for cmd in commands.iter().filter(|c| keys.iter().any(|k| *k == c.key)) {
+            text.push_str(&format!("    {:<28} {}\n", cmd.label, cmd.description));
+        }
+        text.push('\n');
+    }
+
+    let dynamic_skills: Vec<&SignetCommand> = commands
         .iter()
-        .filter(|c| matches!(c.key, "forge-usage" | "auth"))
-    {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
+        .filter(|c| matches!(c.kind, CommandKind::Skill { .. }))
+        .collect();
+    if !dynamic_skills.is_empty() {
+        text.push_str("  Installed Skills:\n");
+        for cmd in dynamic_skills {
+            text.push_str(&format!("    {:<28} {}\n", cmd.label, cmd.description));
+        }
+        text.push('\n');
     }
-    text.push_str("\n  Status & Diagnostics:\n");
-    for cmd in all_commands().iter().filter(|c| {
-        matches!(
-            c.key,
-            "status" | "doctor" | "logs" | "health" | "diagnostics"
-        )
-    }) {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
-    }
-    text.push_str("\n  Memory:\n");
-    for cmd in all_commands()
+
+    let dynamic_mcp: Vec<&SignetCommand> = commands
         .iter()
-        .filter(|c| matches!(c.key, "recall" | "remember" | "recall-test"))
-    {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
+        .filter(|c| matches!(c.kind, CommandKind::McpServer { .. } | CommandKind::McpTool { .. }))
+        .collect();
+    if !dynamic_mcp.is_empty() {
+        text.push_str("  MCP Commands:\n");
+        for cmd in dynamic_mcp {
+            text.push_str(&format!("    {:<28} {}\n", cmd.label, cmd.description));
+        }
+        text.push('\n');
     }
-    text.push_str("\n  Embeddings:\n");
-    for cmd in all_commands()
-        .iter()
-        .filter(|c| matches!(c.key, "embed-audit" | "embed-backfill"))
-    {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
-    }
-    text.push_str("\n  Management:\n");
-    for cmd in all_commands().iter().filter(|c| {
-        matches!(
-            c.key,
-            "skill-list" | "secret-list" | "sync" | "pipeline"
-        )
-    }) {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
-    }
-    text.push_str("\n  Daemon:\n");
-    for cmd in all_commands()
-        .iter()
-        .filter(|c| matches!(c.key, "daemon-restart" | "daemon-stop"))
-    {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
-    }
-    text.push_str("\n  Repair:\n");
-    for cmd in all_commands().iter().filter(|c| {
-        matches!(c.key, "repair-requeue" | "repair-leases" | "repair-fts")
-    }) {
-        text.push_str(&format!("    {:<22} {}\n", cmd.label, cmd.description));
-    }
-    text.push_str("\n  Press Ctrl+G to open the interactive command picker.\n");
+
+    text.push_str("  Press Ctrl+G to open the interactive command picker.\n");
     text
 }
 
-/// Argument suggestions for commands that take parameters
 struct ArgSuggestion {
     value: &'static str,
     description: &'static str,
@@ -498,16 +393,19 @@ const THEME_ARGS: &[ArgSuggestion] = &[
     ArgSuggestion { value: "amber", description: "Warm retro terminal" },
 ];
 
-/// Render a slash command autocomplete dropdown above the input area.
-/// Shows filtered commands as greyed-out suggestions.
-pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer, theme: &Theme) {
+pub fn render_autocomplete(
+    input: &str,
+    commands: &[SignetCommand],
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &Theme,
+) {
     let query = input.trim_start_matches('/');
     if query.is_empty() {
-        render_suggestions(&all_commands(), area, buf, theme);
+        render_suggestions(commands, area, buf, theme);
         return;
     }
 
-    // Check for argument-level autocomplete (e.g. "/effort l", "/model cl", "/theme s")
     if let Some((cmd, arg_prefix)) = query.split_once(' ') {
         let arg_lower = arg_prefix.to_lowercase();
         match cmd {
@@ -533,14 +431,15 @@ pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer, theme: &Th
                 render_model_suggestions(&arg_lower, area, buf, theme);
                 return;
             }
-            _ => return, // No arg suggestions for other commands
+            _ => {}
         }
     }
 
     let query_lower = query.to_lowercase();
-    let matches: Vec<SignetCommand> = all_commands()
-        .into_iter()
-        .filter(|c| c.key.starts_with(&query_lower) || c.label.contains(&query_lower))
+    let matches: Vec<SignetCommand> = commands
+        .iter()
+        .filter(|c| c.key.starts_with(&query_lower) || c.label.to_lowercase().contains(&query_lower))
+        .cloned()
         .collect();
 
     if !matches.is_empty() {
@@ -549,42 +448,31 @@ pub fn render_autocomplete(input: &str, area: Rect, buf: &mut Buffer, theme: &Th
 }
 
 fn render_suggestions(commands: &[SignetCommand], area: Rect, buf: &mut Buffer, theme: &Theme) {
-    // Show max 8 suggestions, positioned above the input area
     let max_show = 8.min(commands.len());
     let height = (max_show + 1) as u16;
-    let width = 50u16.min(area.width.saturating_sub(4));
-
+    let width = 64u16.min(area.width.saturating_sub(4));
     let y = area.y.saturating_sub(height + 1);
     let x = area.x + 2;
     let popup = Rect::new(x, y, width, height);
 
-    // Clear background with surface color
     for row in popup.y..popup.y + popup.height {
         for col in popup.x..popup.x + popup.width {
             if col < buf.area().width && row < buf.area().height {
-                buf[(col, row)]
-                    .set_char(' ')
-                    .set_bg(theme.surface);
+                buf[(col, row)].set_char(' ').set_bg(theme.surface);
             }
         }
     }
 
-    // Render each suggestion
     for (i, cmd) in commands.iter().take(max_show).enumerate() {
         let row = popup.y + i as u16;
         if row >= buf.area().height {
             break;
         }
 
-        let label_span = Span::styled(
-            format!(" {:<18}", cmd.label),
-            Style::default().fg(theme.muted),
-        );
-        let desc_span = Span::styled(
-            cmd.description,
-            Style::default().fg(theme.border),
-        );
-        let line = Line::from(vec![label_span, desc_span]);
+        let line = Line::from(vec![
+            Span::styled(format!(" {:<24}", cmd.label), Style::default().fg(theme.muted)),
+            Span::styled(cmd.description.clone(), Style::default().fg(theme.border)),
+        ]);
         buf.set_line(popup.x, row, &line, popup.width);
     }
 
@@ -631,10 +519,9 @@ fn render_arg_suggestions(args: &[&ArgSuggestion], area: Rect, buf: &mut Buffer,
 
 fn render_model_suggestions(prefix: &str, area: Rect, buf: &mut Buffer, theme: &Theme) {
     use crate::views::model_picker::ModelEntry;
-
-    // Reuse the default model list
     let models = super::model_picker::default_models();
-    let filtered: Vec<&ModelEntry> = models.iter()
+    let filtered: Vec<&ModelEntry> = models
+        .iter()
         .filter(|m| {
             prefix.is_empty()
                 || m.display_name.to_lowercase().contains(prefix)
@@ -673,28 +560,14 @@ fn render_model_suggestions(prefix: &str, area: Rect, buf: &mut Buffer, theme: &
         ]);
         buf.set_line(popup.x, row, &line, popup.width);
     }
-
-    if filtered.len() > max_show {
-        let more_row = popup.y + max_show as u16;
-        if more_row < buf.area().height {
-            let more = Span::styled(
-                format!(" ... {} more", filtered.len() - max_show),
-                Style::default().fg(theme.muted),
-            );
-            buf.set_line(popup.x, more_row, &Line::from(more), popup.width);
-        }
-    }
 }
 
-/// Return the best tab-completion for the current input.
-/// Returns the completed string (with leading `/`) or None if no match.
-pub fn tab_complete(input: &str) -> Option<String> {
+pub fn tab_complete(input: &str, commands: &[SignetCommand]) -> Option<String> {
     let query = input.trim_start_matches('/');
     if query.is_empty() {
         return None;
     }
 
-    // Argument completion for known commands
     if let Some((cmd, arg_prefix)) = query.split_once(' ') {
         let arg_lower = arg_prefix.to_lowercase();
         let suggestions: &[ArgSuggestion] = match cmd {
@@ -712,18 +585,17 @@ pub fn tab_complete(input: &str) -> Option<String> {
         return None;
     }
 
-    // Command name completion
     let query_lower = query.to_lowercase();
-    let matches: Vec<SignetCommand> = all_commands()
-        .into_iter()
+    let matches: Vec<SignetCommand> = commands
+        .iter()
         .filter(|c| c.key.starts_with(&query_lower))
+        .cloned()
         .collect();
 
     if matches.len() == 1 {
         Some(format!("/{}", matches[0].key))
     } else if matches.len() > 1 {
-        // Find longest common prefix among matches
-        let first = matches[0].key;
+        let first = matches[0].key.clone();
         let prefix_len = first
             .char_indices()
             .take_while(|(i, c)| {
