@@ -602,12 +602,14 @@ impl App {
                             self.voice_interim_text = text;
                         }
                         VoiceResult::Final(text) => {
+                            self.voice_recording = false;
+                            self.voice_recorder = None;
+                            self.voice_interim_text.clear();
                             if !text.is_empty() {
                                 let byte_pos = self.cursor_byte_pos();
                                 self.input.insert_str(byte_pos, &text);
                                 self.cursor += text.chars().count();
                             }
-                            self.voice_interim_text.clear();
                         }
                         VoiceResult::ModelReady(path) => {
                             self.voice_model_path = Some(path);
@@ -1118,6 +1120,12 @@ impl App {
                 self.scroll_offset = self.scroll_offset.saturating_sub(3);
             }
             Action::Cancel => {
+                // Always clear voice state on cancel
+                if self.voice_recording {
+                    self.voice_recording = false;
+                    self.voice_recorder = None;
+                    self.voice_interim_text.clear();
+                }
                 if self.processing {
                     // Abort the running agent task (kills CLI subprocess too)
                     if let Some(handle) = self.agent_task.take() {
